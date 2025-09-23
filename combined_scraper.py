@@ -18,12 +18,20 @@ def run_combined_scraper():
         "Days_Left", "Clickable_Link"
     ]
 
+    def enforce_schema(df, source):
+        """Force dataframe into the final schema."""
+        for col in final_columns:
+            if col not in df.columns:
+                df[col] = pd.NA
+        df["Source"] = source
+        return df[final_columns]
+
     # Run NGOBOX
     print("🔍 Running NGOBOX scraper...")
     try:
-        ngobox_df = scrape_ngobox()
+        ngobox_df = enforce_schema(scrape_ngobox(), "NGOBOX")
         print(f"✅ NGOBOX scraped {len(ngobox_df)} items")
-    except Exception as e:
+    except Exception:
         print("❌ NGOBOX failed:")
         traceback.print_exc()
         ngobox_df = pd.DataFrame(columns=final_columns)
@@ -31,9 +39,9 @@ def run_combined_scraper():
     # Run DevNetJobs
     print("🔍 Running DevNetJobs India scraper...")
     try:
-        devnet_df = scrape_devnetjobs()
+        devnet_df = enforce_schema(scrape_devnetjobs(), "DevNetJobsIndia")
         print(f"✅ DevNet scraped {len(devnet_df)} items")
-    except Exception as e:
+    except Exception:
         print("❌ DevNet failed:")
         traceback.print_exc()
         devnet_df = pd.DataFrame(columns=final_columns)
@@ -41,9 +49,10 @@ def run_combined_scraper():
     # Run Nasscom
     print("🔍 Running Nasscom scraper...")
     try:
-        nasscom_df = scrape_nasscom()
+        nasscom_df = enforce_schema(scrape_nasscom(), "Nasscom")
+        nasscom_df["Days_Left"] = pd.NA  # ✅ Force NA
         print(f"✅ Nasscom scraped {len(nasscom_df)} items")
-    except Exception as e:
+    except Exception:
         print("❌ Nasscom failed:")
         traceback.print_exc()
         nasscom_df = pd.DataFrame(columns=final_columns)
@@ -54,28 +63,18 @@ def run_combined_scraper():
         wri_data = fetch_wri_opportunities()
         if wri_data:
             wri_df = pd.DataFrame(wri_data)
-            wri_df["Source"] = "WRI"
+            wri_df = enforce_schema(wri_df, "WRI")
             wri_df["Type"] = "N/A"
-            wri_df["Deadline"] = pd.NaT
+            wri_df["Deadline"] = pd.NA
             wri_df["Days_Left"] = pd.NA
             print(f"✅ WRI scraped {len(wri_df)} items")
         else:
             print("⚠️ WRI returned no data")
             wri_df = pd.DataFrame(columns=final_columns)
-    except Exception as e:
+    except Exception:
         print("❌ WRI failed:")
         traceback.print_exc()
         wri_df = pd.DataFrame(columns=final_columns)
-
-    # Align schemas
-    ngobox_df = ngobox_df.reindex(columns=final_columns)
-    devnet_df = devnet_df.reindex(columns=final_columns)
-    nasscom_df = nasscom_df.reindex(columns=final_columns)
-    wri_df = wri_df.reindex(columns=final_columns)
-
-    # Force Nasscom Days_Left = NaN
-    if "Days_Left" in nasscom_df.columns:
-        nasscom_df["Days_Left"] = pd.NA
 
     # Merge everything
     combined_df = pd.concat([ngobox_df, devnet_df, nasscom_df, wri_df], ignore_index=True)
@@ -84,21 +83,14 @@ def run_combined_scraper():
         print("❌ No data found from any source.")
         return
 
-    # Ensure Clickable_Link always filled properly
-    if "Clickable_Link" in combined_df.columns:
-        combined_df["Clickable_Link"] = combined_df.apply(
-            lambda row: row["Clickable_Link"]
-            if pd.notna(row["Clickable_Link"]) and "HYPERLINK" in str(row["Clickable_Link"])
-            else "",
-            axis=1,
-        )
+    # ✅ Ensure Clickable_Link is always a string
+    combined_df["Clickable_Link"] = combined_df["Clickable_Link"].fillna("")
 
-    # Filter out expired deadlines (only where Days_Left is numeric)
-    if "Days_Left" in combined_df.columns:
-        combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-        combined_df = combined_df[combined_df["Days_Left"].fillna(0) >= 0]
+    # ✅ Handle Days_Left
+    combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
+    combined_df["Days_Left"] = combined_df["Days_Left"].fillna(9999)  # no deadline → 9999
 
-    # Sort soonest first
+    # ✅ Sort soonest first
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
 
     # Save to Excel
