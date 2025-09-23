@@ -89,12 +89,15 @@ def run_combined_scraper():
     # ✅ Ensure Clickable_Link is always a string
     combined_df["Clickable_Link"] = combined_df["Clickable_Link"].fillna("")
 
-    # ✅ Handle Days_Left
+    # ✅ Handle Days_Left for sorting, but keep blank in final output
     combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-    combined_df["Days_Left"] = combined_df["Days_Left"].fillna(9999)  # no deadline → 9999
+    combined_df["Days_Left"] = combined_df["Days_Left"].fillna(9999)
 
     # ✅ Sort soonest first
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
+
+    # ✅ Replace 9999 with empty string for a cleaner Excel output
+    combined_df["Days_Left"] = combined_df["Days_Left"].replace(9999, "")
 
     # Save to Excel
     excel_path = "all_grants.xlsx"
