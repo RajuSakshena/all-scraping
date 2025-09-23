@@ -169,7 +169,7 @@ def fetch_opportunities(type_name, base_url, verticals):
                 "Matched_Vertical": ", ".join(sorted(set(matched_verticals))),
                 "Deadline": format_deadline(deadline),
                 "Days_Left": compute_days_left(deadline),
-                "Link": link
+                "Clickable_Link": '=HYPERLINK("{}","{}")'.format(link.replace('"', '""'), title.replace('"', '""'))
             })
 
             seen_links.add(link)
@@ -191,7 +191,7 @@ def scrape_ngobox():
         return pd.DataFrame()
 
     df = pd.DataFrame(all_data)
-    df = df[df['Link'].notna() & (df['Link'].str.strip() != '')]
+    df = df[df['Clickable_Link'].notna() & (df['Clickable_Link'].str.strip() != '')]
 
     # Add Source column
     df["Source"] = "NGOBOX"
@@ -206,4 +206,3 @@ def scrape_ngobox():
 
 if __name__ == "__main__":
     print(scrape_ngobox().head())
-
