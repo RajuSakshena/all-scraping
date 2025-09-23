@@ -35,18 +35,14 @@ if st.button("🔄 Run Scraper"):
 if os.path.exists("all_grants.xlsx"):
     df = pd.read_excel("all_grants.xlsx")
 
-    # ✅ Ensure Days_Left column exists
-    if "Days_Left" not in df.columns:
-        def compute_days_left(deadline):
-            try:
-                dt = pd.to_datetime(deadline, format="%d-%m-%Y", errors="coerce")
-                if pd.isna(dt):
-                    return 9999
-                return (dt.date() - datetime.today().date()).days
-            except:
-                return 9999
-        df["Days_Left"] = df["Deadline"].apply(compute_days_left)
-
+    # This is the new change: check for the Days_Left column and fill 9999 values
+    if "Days_Left" in df.columns:
+        df["Days_Left"] = df["Days_Left"].fillna("").astype(str)
+        df["Days_Left"] = df["Days_Left"].replace("9999.0", "")
+        df["Days_Left"] = df["Days_Left"].replace("9999", "")
+    else:
+        df["Days_Left"] = ""
+    
     # Sidebar filters
     st.sidebar.header("Filters")
 
@@ -61,7 +57,7 @@ if os.path.exists("all_grants.xlsx"):
         options=sorted(df["Source"].unique()),
         default=[]
     )
-
+    
     # Apply filters (only verticals + sources, no days filter)
     filtered_df = df.copy()
     if verticals:
@@ -76,11 +72,8 @@ if os.path.exists("all_grants.xlsx"):
     st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
 
     # Show styled dataframe
-    st.dataframe(
-        filtered_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm"),
-        use_container_width=True,
-        height=600
-    )
+    # The background_gradient is removed because Days_Left is no longer a number
+    st.dataframe(filtered_df, use_container_width=True, height=600)
 
     # Download button
     st.download_button(
