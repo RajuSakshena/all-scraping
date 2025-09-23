@@ -1,93 +1,130 @@
-import streamlit as st
-import pandas as pd
-from combined_scraper import run_combined_scraper
-from datetime import datetime
 import os
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+from openpyxl import load_workbook
+from openpyxl.styles import Alignment
+from datetime import datetime
+import traceback  # ✅ Added
 
-st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
+# Import all scrapers
+from main_scraper import scrape_ngobox
+from dev import scrape_devnetjobs
+from nasscom import scrape_nasscom
+from wri import fetch_wri_opportunities
 
-st.title("📊 Grants & RFP Combined Scraper")
 
-st.markdown("""
-This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, and **WRI India**,  
-merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
-""")
+def run_combined_scraper():
+    final_columns = [
+        "Source", "Type", "Title", "Description",
+        "How_to_Apply", "Matched_Vertical", "Deadline",
+        "Days_Left", "Clickable_Link"
+    ]
 
-# Button to trigger scraping
-if st.button("🔄 Run Scraper"):
-    with st.spinner("Scraping in progress... please wait ⏳"):
-        run_combined_scraper()
-    st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
-    
-    # ✅ Add debug summary
-    st.subheader("🛠 Debug: Latest Scrape Summary")
-    if os.path.exists("all_grants.xlsx"):
-        df = pd.read_excel("all_grants.xlsx")
-        st.write("### Source Counts")
-        st.write(df["Source"].value_counts())
-        st.write(f"### Total Rows: {len(df)}")
-        st.write("### First 10 Rows Preview")
-        st.dataframe(df.head(10))
-    else:
-        st.warning("No data generated.")
+    def enforce_schema(df, source):
+        """Force dataframe into the final schema."""
+        for col in final_columns:
+            if col not in df.columns:
+                df[col] = pd.NA
+        df["Source"] = source
+        return df[final_columns]
 
-# Display data if Excel already exists
-if os.path.exists("all_grants.xlsx"):
-    df = pd.read_excel("all_grants.xlsx")
+    # Run NGOBOX
+    print("🔍 Running NGOBOX scraper...")
+    try:
+        ngobox_df = enforce_schema(scrape_ngobox(), "NGOBOX")
+        print(f"✅ NGOBOX scraped {len(ngobox_df)} items")
+    except Exception:
+        print("❌ NGOBOX failed:")
+        traceback.print_exc()
+        ngobox_df = pd.DataFrame(columns=final_columns)
 
-    # ✅ Ensure Days_Left column exists
-    if "Days_Left" not in df.columns:
-        def compute_days_left(deadline):
-            try:
-                dt = pd.to_datetime(deadline, format="%d-%m-%Y", errors="coerce")
-                if pd.isna(dt):
-                    return 9999
-                return (dt.date() - datetime.today().date()).days
-            except:
-                return 9999
-        df["Days_Left"] = df["Deadline"].apply(compute_days_left)
+    # Run DevNetJobs
+    print("🔍 Running DevNetJobs India scraper...")
+    try:
+        devnet_df = enforce_schema(scrape_devnetjobs(), "DevNetJobsIndia")
+        print(f"✅ DevNet scraped {len(devnet_df)} items")
+    except Exception:
+        print("❌ DevNet failed:")
+        traceback.print_exc()
+        devnet_df = pd.DataFrame(columns=final_columns)
 
-    # Sidebar filters
-    st.sidebar.header("Filters")
+    # Run Nasscom
+    print("🔍 Running Nasscom scraper...")
+    try:
+        nasscom_df = enforce_schema(scrape_nasscom(), "Nasscom")
+        nasscom_df["Days_Left"] = pd.NA  # ✅ Force NA
+        print(f"✅ Nasscom scraped {len(nasscom_df)} items")
+    except Exception:
+        print("❌ Nasscom failed:")
+        traceback.print_exc()
+        nasscom_df = pd.DataFrame(columns=final_columns)
 
-    verticals = st.sidebar.multiselect(
-        "Filter by Vertical:",
-        options=sorted(df["Matched_Vertical"].dropna().unique()),
-        default=[]
-    )
+    # Run WRI
+    print("🔍 Running WRI scraper...")
+    try:
+        wri_data = fetch_wri_opportunities()
+        if wri_data:
+            wri_df = pd.DataFrame(wri_data)
+            wri_df = enforce_schema(wri_df, "WRI")
+            wri_df["Type"] = "N/A"
+            wri_df["Deadline"] = pd.NA
+            wri_df["Days_Left"] = pd.NA
+            print(f"✅ WRI scraped {len(wri_df)} items")
+        else:
+            print("⚠️ WRI returned no data")
+            wri_df = pd.DataFrame(columns=final_columns)
+    except Exception:
+        print("❌ WRI failed:")
+        traceback.print_exc()
+        wri_df = pd.DataFrame(columns=final_columns)
 
-    sources = st.sidebar.multiselect(
-        "Filter by Source:",
-        options=sorted(df["Source"].unique()),
-        default=[]
-    )
+    # Merge everything
+    combined_df = pd.concat([ngobox_df, devnet_df, nasscom_df, wri_df], ignore_index=True)
 
-    # Apply filters (only verticals + sources, no days filter)
-    filtered_df = df.copy()
-    if verticals:
-        filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(verticals)]
-    if sources:
-        filtered_df = filtered_df[filtered_df["Source"].isin(sources)]
+    if combined_df.empty:
+        print("❌ No data found from any source.")
+        return
 
-    # ✅ Show row counts by source
-    st.write("### 📊 Breakdown by Source (After Filters)")
-    st.write(filtered_df["Source"].value_counts())
+    # ✅ Ensure Clickable_Link is always a string
+    combined_df["Clickable_Link"] = combined_df["Clickable_Link"].fillna("")
 
-    st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
+    # ✅ Handle Days_Left
+    combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
+    combined_df["Days_Left"] = combined_df["Days_Left"].fillna(9999)  # no deadline → 9999
 
-    # Show styled dataframe
-    st.dataframe(
-        filtered_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm"),
-        use_container_width=True,
-        height=600
-    )
+    # ✅ Sort soonest first
+    combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
 
-    # Download button
-    st.download_button(
-        label="⬇️ Download as Excel",
-        data=open("all_grants.xlsx", "rb").read(),
-        file_name="all_grants.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-else:
-    st.info("ℹ️ No data yet. Click **Run Scraper** to generate.")
+    # Save to Excel
+    excel_path = "all_grants.xlsx"
+    combined_df.to_excel(excel_path, index=False, engine="openpyxl")
+
+    # Format Excel
+    wb = load_workbook(excel_path)
+    ws = wb.active
+
+    col_widths = {
+        "A": 15, "B": 15, "C": 50, "D": 100,
+        "E": 60, "F": 25, "G": 18, "H": 12, "I": 60,
+    }
+    for col, width in col_widths.items():
+        ws.column_dimensions[col].width = width
+    for row in ws.iter_rows(min_row=2):
+        for cell in row:
+            if cell.column_letter in ["D", "E"]:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            else:
+                cell.alignment = Alignment(wrap_text=False, vertical="top")
+
+    wb.save(excel_path)
+
+    # Print summary
+    print("\n📊 Summary of scraped data:")
+    print(combined_df["Source"].value_counts())
+    print(f"Total rows in final dataset: {len(combined_df)}")
+    print(f"✅ Combined Excel saved as {excel_path} (Rows: {len(combined_df)})")
+
+
+if __name__ == "__main__":
+    run_combined_scraper()
