@@ -214,7 +214,7 @@ def extract_assignments(session: requests.Session, html: str, hidden: dict, vert
             "Deadline": format_deadline(deadline),
             "Days_Left": compute_days_left(deadline),
             "Matched_Vertical": ", ".join(sorted(set(matched_verticals))),
-            "Link": link
+            "Clickable_Link": '=HYPERLINK("{}","{}")'.format(link.replace('"', '""'), title.replace('"', '""'))
         })
     return results
 
@@ -236,7 +236,7 @@ def scrape_devnetjobs():
     df["Source"] = "DevNetJobsIndia"
     df["Type"] = ""
     df = df[["Source", "Type", "Title", "Description", "How_to_Apply",
-             "Matched_Vertical", "Deadline", "Days_Left", "Link"]]
+             "Matched_Vertical", "Deadline", "Days_Left", "Clickable_Link"]]
     return df
 
 if __name__ == "__main__":
