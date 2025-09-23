@@ -62,26 +62,12 @@ if os.path.exists("all_grants.xlsx"):
         default=[]
     )
 
-    # Apply filters
+    # Apply filters (only verticals + sources, no days filter)
     filtered_df = df.copy()
     if verticals:
         filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(verticals)]
     if sources:
         filtered_df = filtered_df[filtered_df["Source"].isin(sources)]
-
-    # ✅ Show Days_Left slider only if not Nasscom or WRI
-    if not (sources == ["Nasscom"] or sources == ["WRI"]):
-        if not filtered_df["Days_Left"].dropna().empty:
-            min_days, max_days = int(filtered_df["Days_Left"].min()), int(filtered_df["Days_Left"].max())
-            days_range = st.sidebar.slider(
-                "Days Left Range:",
-                min_value=min_days,
-                max_value=max_days if max_days != 9999 else 365,
-                value=(0, min(60, max_days if max_days != 9999 else 365))
-            )
-            filtered_df = filtered_df[
-                (filtered_df["Days_Left"] >= days_range[0]) & (filtered_df["Days_Left"] <= days_range[1])
-            ]
 
     # ✅ Show row counts by source
     st.write("### 📊 Breakdown by Source (After Filters)")
@@ -89,7 +75,7 @@ if os.path.exists("all_grants.xlsx"):
 
     st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
 
-    # Show styled dataframe (without Link column)
+    # Show styled dataframe
     st.dataframe(
         filtered_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm"),
         use_container_width=True,
