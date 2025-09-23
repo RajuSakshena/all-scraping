@@ -19,11 +19,15 @@ if st.button("🔄 Run Scraper"):
         run_combined_scraper()
     st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
     
-    # ✅ Add this for UI debug
-    st.subheader("Debug: Latest Scrape Summary")
+    # ✅ Add debug summary
+    st.subheader("🛠 Debug: Latest Scrape Summary")
     if os.path.exists("all_grants.xlsx"):
         df = pd.read_excel("all_grants.xlsx")
+        st.write("### Source Counts")
         st.write(df["Source"].value_counts())
+        st.write(f"### Total Rows: {len(df)}")
+        st.write("### First 10 Rows Preview")
+        st.dataframe(df.head(10))
     else:
         st.warning("No data generated.")
 
@@ -80,7 +84,7 @@ if os.path.exists("all_grants.xlsx"):
             ]
 
     # ✅ Show row counts by source
-    st.write("### 📊 Breakdown by Source")
+    st.write("### 📊 Breakdown by Source (After Filters)")
     st.write(filtered_df["Source"].value_counts())
 
     st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
