@@ -4,83 +4,118 @@ from combined_scraper import run_combined_scraper
 from datetime import datetime
 import os
 
+# Streamlit page configuration
 st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 
+# Title and description
 st.title("📊 Grants & RFP Combined Scraper")
-
 st.markdown("""
-This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, and **WRI India**,  
+This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, and **HCL Foundation**,
 merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
 """)
 
 # Button to trigger scraping
 if st.button("🔄 Run Scraper"):
     with st.spinner("Scraping in progress... please wait ⏳"):
-        run_combined_scraper()
-    st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
-    
-    # ✅ Add debug summary
-    st.subheader("🛠 Debug: Latest Scrape Summary")
-    if os.path.exists("all_grants.xlsx"):
-        df = pd.read_excel("all_grants.xlsx")
-        st.write("### Source Counts")
-        st.write(df["Source"].value_counts())
-        st.write(f"### Total Rows: {len(df)}")
-        st.write("### First 10 Rows Preview")
-        st.dataframe(df.head(10))
-    else:
-        st.warning("No data generated.")
+        try:
+            run_combined_scraper()
+            st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
+        except Exception as e:
+            st.error(f"❌ Scraping failed: {e}")
+            st.info("Please try again or check the logs for details.")
 
-# Display data if Excel already exists
+# Display data if Excel exists
 if os.path.exists("all_grants.xlsx"):
-    df = pd.read_excel("all_grants.xlsx")
+    try:
+        df = pd.read_excel("all_grants.xlsx")
 
-    # This is the new change: check for the Days_Left column and fill 9999 values
-    if "Days_Left" in df.columns:
-        df["Days_Left"] = df["Days_Left"].fillna("").astype(str)
-        df["Days_Left"] = df["Days_Left"].replace("9999.0", "")
-        df["Days_Left"] = df["Days_Left"].replace("9999", "")
-    else:
-        df["Days_Left"] = ""
-    
-    # Sidebar filters
-    st.sidebar.header("Filters")
+        # Ensure Days_Left column exists and is numeric
+        if "Days_Left" not in df.columns:
+            def compute_days_left(deadline):
+                try:
+                    dt = pd.to_datetime(deadline, errors="coerce")
+                    if pd.isna(dt):
+                        return pd.NA
+                    return (dt.date() - datetime.today().date()).days
+                except:
+                    return pd.NA
+            df["Days_Left"] = df["Deadline"].apply(compute_days_left)
 
-    verticals = st.sidebar.multiselect(
-        "Filter by Vertical:",
-        options=sorted(df["Matched_Vertical"].dropna().unique()),
-        default=[]
-    )
+        # Convert Days_Left to numeric for filtering
+        df["Days_Left"] = pd.to_numeric(df["Days_Left"], errors="coerce")
 
-    sources = st.sidebar.multiselect(
-        "Filter by Source:",
-        options=sorted(df["Source"].unique()),
-        default=[]
-    )
-    
-    # Apply filters (only verticals + sources, no days filter)
-    filtered_df = df.copy()
-    if verticals:
-        filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(verticals)]
-    if sources:
-        filtered_df = filtered_df[filtered_df["Source"].isin(sources)]
+        # Sidebar filters
+        st.sidebar.header("Filters")
 
-    # ✅ Show row counts by source
-    st.write("### 📊 Breakdown by Source (After Filters)")
-    st.write(filtered_df["Source"].value_counts())
+        # Vertical filter
+        verticals = sorted(df["Matched_Vertical"].dropna().unique())
+        selected_verticals = st.sidebar.multiselect(
+            "Filter by Vertical:",
+            options=verticals,
+            default=[]
+        )
 
-    st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
+        # Source filter
+        sources = sorted(df["Source"].dropna().unique())
+        selected_sources = st.sidebar.multiselect(
+            "Filter by Source:",
+            options=sources,
+            default=[]
+        )
 
-    # Show styled dataframe
-    # The background_gradient is removed because Days_Left is no longer a number
-    st.dataframe(filtered_df, use_container_width=True, height=600)
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_verticals:
+            filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(selected_verticals)]
+        if selected_sources:
+            filtered_df = filtered_df[filtered_df["Source"].isin(selected_sources)]
 
-    # Download button
-    st.download_button(
-        label="⬇️ Download as Excel",
-        data=open("all_grants.xlsx", "rb").read(),
-        file_name="all_grants.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        # Days Left slider (exclude Nasscom and WRI if only they are selected)
+        if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
+            if not filtered_df["Days_Left"].dropna().empty:
+                min_days = int(filtered_df["Days_Left"].min()) if not pd.isna(filtered_df["Days_Left"].min()) else 0
+                max_days = int(filtered_df["Days_Left"].max()) if not pd.isna(filtered_df["Days_Left"].max()) else 365
+                if max_days == 999 or max_days == 9999:
+                    max_days = 365
+                days_range = st.sidebar.slider(
+                    "Days Left Range:",
+                    min_value=max(min_days, 0),
+                    max_value=max_days,
+                    value=(0, min(60, max_days)),
+                    step=1
+                )
+                filtered_df = filtered_df[
+                    (filtered_df["Days_Left"].fillna(999) >= days_range[0]) &
+                    (filtered_df["Days_Left"].fillna(999) <= days_range[1])
+                ]
+
+        # Display summary
+        st.write("### 📊 Breakdown by Source")
+        if filtered_df.empty:
+            st.warning("⚠️ No data matches the selected filters.")
+        else:
+            st.write(filtered_df["Source"].value_counts())
+            st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
+
+            # Display styled dataframe (hide Clickable_Link for cleaner UI)
+            display_df = filtered_df.drop(columns=["Clickable_Link"], errors="ignore")
+            st.dataframe(
+                display_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm", vmin=0, vmax=60),
+                use_container_width=True,
+                height=600
+            )
+
+        # Download button
+        with open("all_grants.xlsx", "rb") as f:
+            st.download_button(
+                label="⬇️ Download as Excel",
+                data=f,
+                file_name="all_grants.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    except Exception as e:
+        st.error(f"❌ Error loading data: {e}")
+        st.info("Please run the scraper again to generate fresh data.")
 else:
     st.info("ℹ️ No data yet. Click **Run Scraper** to generate.")
