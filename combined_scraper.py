@@ -30,12 +30,10 @@ def run_combined_scraper():
         wri_data = fetch_wri_opportunities()
         if wri_data:
             wri_df = pd.DataFrame(wri_data)
-            # Add missing schema columns for WRI
             wri_df["Source"] = "WRI"
             wri_df["Type"] = "N/A"
             wri_df["Deadline"] = pd.NaT
             wri_df["Days_Left"] = pd.NA
-            # Ensure Clickable_Link column name is correct
             wri_df = wri_df.rename(columns={"Clickable_Link": "Clickable_Link"}) if "Clickable_Link" in wri_df.columns else wri_df
         else:
             wri_df = pd.DataFrame()
@@ -55,21 +53,20 @@ def run_combined_scraper():
         hcl_df = pd.DataFrame()
 
     # --- Final Schema Alignment and Merging ---
-
     final_columns = [
         "Source", "Type", "Title", "Description",
         "How_to_Apply", "Matched_Vertical", "Deadline",
         "Days_Left", "Clickable_Link"
     ]
 
-    # Align schemas for all dataframes
+    # Align schemas
     ngobox_df = ngobox_df.reindex(columns=final_columns)
     devnet_df = devnet_df.reindex(columns=final_columns)
     nasscom_df = nasscom_df.reindex(columns=final_columns)
     wri_df = wri_df.reindex(columns=final_columns)
     hcl_df = hcl_df.reindex(columns=final_columns)
 
-    # Force Nasscom Days_Left = NaN (blank in Excel)
+    # Force Nasscom Days_Left blank
     if "Days_Left" in nasscom_df.columns:
         nasscom_df["Days_Left"] = pd.NA
 
@@ -83,7 +80,7 @@ def run_combined_scraper():
         print("❌ No data found from any source.")
         return
 
-    # Ensure Clickable_Link always filled properly (for Excel HYPERLINK function)
+    # Ensure Clickable_Link cleaned
     if "Clickable_Link" in combined_df.columns:
         combined_df["Clickable_Link"] = combined_df.apply(
             lambda row: row["Clickable_Link"]
@@ -92,25 +89,19 @@ def run_combined_scraper():
             axis=1,
         )
 
-    # Calculate Days_Left based on Deadline
-    def compute_days_left(deadline):
-        try:
-            dt = pd.to_datetime(deadline, errors="coerce")
-            if pd.isna(dt):
-                return pd.NA
-            days = (dt.date() - datetime.now().date()).days
-            return days if days >= 0 else pd.NA  # Only keep non-negative days
-        except:
-            return pd.NA
-
-    combined_df["Days_Left"] = combined_df["Deadline"].apply(compute_days_left)
-
-    # Convert Days_Left to integer, keeping NaN as is
-    combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-    combined_df["Days_Left"] = combined_df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
+    # Filter out expired deadlines
+    if "Days_Left" in combined_df.columns:
+        combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
+        combined_df = combined_df[combined_df["Days_Left"].fillna(999) >= 0]
 
     # Sort soonest first
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
+
+    # ✅ Round Days_Left for Excel display (no decimals)
+    if "Days_Left" in combined_df.columns:
+        combined_df["Days_Left"] = combined_df["Days_Left"].apply(
+            lambda x: int(round(x)) if pd.notna(x) else x
+        )
 
     # Save to Excel
     excel_path = "all_grants.xlsx"
@@ -121,15 +112,15 @@ def run_combined_scraper():
     ws = wb.active
 
     col_widths = {
-        "A": 15,  # Source
-        "B": 15,  # Type
-        "C": 50,  # Title
-        "D": 100, # Description
-        "E": 60,  # How to Apply
-        "F": 25,  # Matched Vertical
-        "G": 18,  # Deadline
-        "H": 12,  # Days_Left
-        "I": 60,  # Clickable Link
+        "A": 15,
+        "B": 15,
+        "C": 50,
+        "D": 100,
+        "E": 60,
+        "F": 25,
+        "G": 18,
+        "H": 12,
+        "I": 60,
     }
 
     for col, width in col_widths.items():
