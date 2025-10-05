@@ -30,12 +30,12 @@ def run_combined_scraper():
         wri_data = fetch_wri_opportunities()
         if wri_data:
             wri_df = pd.DataFrame(wri_data)
-            # Add missing schema columns for WRI (if not done in wri.py)
+            # Add missing schema columns for WRI
             wri_df["Source"] = "WRI"
             wri_df["Type"] = "N/A"
             wri_df["Deadline"] = pd.NaT
             wri_df["Days_Left"] = pd.NA
-            # Ensure Clickable_Link column name is correct (renaming logic kept)
+            # Ensure Clickable_Link column name is correct
             wri_df = wri_df.rename(columns={"Clickable_Link": "Clickable_Link"}) if "Clickable_Link" in wri_df.columns else wri_df
         else:
             wri_df = pd.DataFrame()
@@ -43,7 +43,6 @@ def run_combined_scraper():
     except Exception as e:
         print(f"❌ WRI scraper failed: {e}")
         wri_df = pd.DataFrame()
-
 
     # ✅ Run HCL
     print("🔍 Running HCL Foundation scraper...")
@@ -54,7 +53,6 @@ def run_combined_scraper():
     except Exception as e:
         print(f"❌ HCL scraper failed: {e}")
         hcl_df = pd.DataFrame()
-
 
     # --- Final Schema Alignment and Merging ---
 
@@ -69,7 +67,7 @@ def run_combined_scraper():
     devnet_df = devnet_df.reindex(columns=final_columns)
     nasscom_df = nasscom_df.reindex(columns=final_columns)
     wri_df = wri_df.reindex(columns=final_columns)
-    hcl_df = hcl_df.reindex(columns=final_columns) # ✅ Align HCL DF
+    hcl_df = hcl_df.reindex(columns=final_columns)
 
     # Force Nasscom Days_Left = NaN (blank in Excel)
     if "Days_Left" in nasscom_df.columns:
@@ -77,7 +75,7 @@ def run_combined_scraper():
 
     # Merge everything
     combined_df = pd.concat(
-        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df], # ✅ Added hcl_df here
+        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df],
         ignore_index=True
     )
 
@@ -94,11 +92,25 @@ def run_combined_scraper():
             axis=1,
         )
 
-    # Filter out expired deadlines (only where Days_Left is numeric)
-    if "Days_Left" in combined_df.columns:
-        combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-        # Keep rows where Days_Left is NaN (like Nasscom's blank) OR >= 0
-        combined_df = combined_df[combined_df["Days_Left"].fillna(999) >= 0] # Fill NaN with a large number to keep them
+    # Calculate Days_Left based on Deadline
+    def compute_days_left(deadline):
+        try:
+            dt = pd.to_datetime(deadline, errors="coerce")
+            if pd.isna(dt):
+                return pd.NA
+            days = (dt.date() - datetime.now().date()).days
+            return days if days >= 0 else pd.NA  # Only keep non-negative days
+        except:
+            return pd.NA
+
+    combined_df["Days_Left"] = combined_df["Deadline"].apply(compute_days_left)
+
+    # Convert Days_Left to integer, replacing NaN with a placeholder (e.g., 999)
+    combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
+    combined_df["Days_Left"] = combined_df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else 999)
+
+    # Filter out expired deadlines and placeholder values
+    combined_df = combined_df[combined_df["Days_Left"] < 999]
 
     # Sort soonest first
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
@@ -107,7 +119,7 @@ def run_combined_scraper():
     excel_path = "all_grants.xlsx"
     combined_df.to_excel(excel_path, index=False, engine="openpyxl")
 
-    # Format Excel (Existing logic preserved)
+    # Format Excel
     wb = load_workbook(excel_path)
     ws = wb.active
 
