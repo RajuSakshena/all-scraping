@@ -41,8 +41,9 @@ if os.path.exists("all_grants.xlsx"):
                     return pd.NA
             df["Days_Left"] = df["Deadline"].apply(compute_days_left)
 
-        # Convert Days_Left to numeric for filtering
+        # Convert Days_Left to numeric and round to integers
         df["Days_Left"] = pd.to_numeric(df["Days_Left"], errors="coerce")
+        df["Days_Left"] = df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
 
         # Sidebar filters
         st.sidebar.header("Filters")
