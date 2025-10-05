@@ -105,12 +105,9 @@ def run_combined_scraper():
 
     combined_df["Days_Left"] = combined_df["Deadline"].apply(compute_days_left)
 
-    # Convert Days_Left to integer, replacing NaN with a placeholder (e.g., 999)
+    # Convert Days_Left to integer, keeping NaN as is
     combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-    combined_df["Days_Left"] = combined_df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else 999)
-
-    # Filter out expired deadlines and placeholder values
-    combined_df = combined_df[combined_df["Days_Left"] < 999]
+    combined_df["Days_Left"] = combined_df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
 
     # Sort soonest first
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
