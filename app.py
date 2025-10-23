@@ -3,7 +3,7 @@ import pandas as pd
 from combined_scraper import run_combined_scraper
 from datetime import datetime
 import os
-
+import re # <-- CRITICAL: Added 're' for regex filtering
 # Streamlit page configuration
 st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 
@@ -49,7 +49,10 @@ if os.path.exists("all_grants.xlsx"):
         st.sidebar.header("Filters")
 
         # Vertical filter
-        verticals = sorted(df["Matched_Vertical"].dropna().unique())
+        # Extract all unique verticals by splitting comma-separated strings
+        all_verticals = df["Matched_Vertical"].dropna().str.split(',\s*').explode().unique()
+        verticals = sorted(all_verticals)
+        
         selected_verticals = st.sidebar.multiselect(
             "Filter by Vertical:",
             options=verticals,
@@ -66,33 +69,42 @@ if os.path.exists("all_grants.xlsx"):
 
         # Apply filters
         filtered_df = df.copy()
+        
         if selected_verticals:
-            filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(selected_verticals)]
+            # CRITICAL FIX: Use str.contains with regex for whole-word matching 
+            # to handle multi-category entries (like from Metro Rail) correctly.
+            search_pattern = r'\b(' + '|'.join(map(re.escape, selected_verticals)) + r')\b'
+            filtered_df = filtered_df[
+                filtered_df["Matched_Vertical"].astype(str).str.contains(search_pattern, case=False, na=False)
+            ]
+            
         if selected_sources:
             filtered_df = filtered_df[filtered_df["Source"].isin(selected_sources)]
 
-        # Days Left slider (exclude Nasscom and WRI if only they are selected)
-        if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
-            if not filtered_df["Days_Left"].dropna().empty:
-                # Handle potential NA values gracefully when determining min/max
-                valid_days = filtered_df["Days_Left"].dropna()
-                if not valid_days.empty:
-                    min_days = int(valid_days.min()) if not pd.isna(valid_days.min()) else 0
-                    max_days = int(valid_days.max()) if not pd.isna(valid_days.max()) else 365
-                else:
-                    min_days, max_days = 0, 365
-
-                # Adjust max_days for display if placeholder values are large
-                if max_days > 365:
-                    max_days = 365
+        # Days Left slider (exclude sources that don't have deadlines if only they are selected)
+        # Check if the filtered sources contain only non-deadline sources
+        non_deadline_sources = {"Nasscom", "WRI"}
+        current_sources = set(filtered_df["Source"].unique())
+        
+        if not current_sources.issubset(non_deadline_sources):
+            # Only proceed with the slider if there's non-empty deadline data in the filtered set
+            valid_days = filtered_df["Days_Left"].dropna()
+            
+            if not valid_days.empty:
+                min_days = int(valid_days.min()) if valid_days.min() < 0 else 0
+                # Use a maximum of 365 days for the slider range, capping large values
+                max_days = int(valid_days.max()) if valid_days.max() < 365 else 365
+                max_slider_value = min(365, max_days)
                 
                 days_range = st.sidebar.slider(
                     "Days Left Range:",
                     min_value=max(min_days, 0),
-                    max_value=max_days,
-                    value=(0, min(60, max_days)),
+                    max_value=max_slider_value,
+                    value=(0, min(60, max_slider_value)),
                     step=1
                 )
+                
+                # Filter the DataFrame based on the slider range, using a large default (999) for NA values
                 filtered_df = filtered_df[
                     (filtered_df["Days_Left"].fillna(999) >= days_range[0]) &
                     (filtered_df["Days_Left"].fillna(999) <= days_range[1])
