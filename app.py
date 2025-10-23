@@ -10,8 +10,8 @@ st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 # Title and description
 st.title("📊 Grants & RFP Combined Scraper")
 st.markdown("""
-This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, and **HCL Foundation**,
-merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
+This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, **HCL Foundation**, 
+and **Nagpur Metro Rail (New)**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
 """)
 
 # Button to trigger scraping
@@ -74,10 +74,18 @@ if os.path.exists("all_grants.xlsx"):
         # Days Left slider (exclude Nasscom and WRI if only they are selected)
         if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
             if not filtered_df["Days_Left"].dropna().empty:
-                min_days = int(filtered_df["Days_Left"].min()) if not pd.isna(filtered_df["Days_Left"].min()) else 0
-                max_days = int(filtered_df["Days_Left"].max()) if not pd.isna(filtered_df["Days_Left"].max()) else 365
-                if max_days == 999 or max_days == 9999:
+                # Handle potential NA values gracefully when determining min/max
+                valid_days = filtered_df["Days_Left"].dropna()
+                if not valid_days.empty:
+                    min_days = int(valid_days.min()) if not pd.isna(valid_days.min()) else 0
+                    max_days = int(valid_days.max()) if not pd.isna(valid_days.max()) else 365
+                else:
+                    min_days, max_days = 0, 365
+
+                # Adjust max_days for display if placeholder values are large
+                if max_days > 365:
                     max_days = 365
+                
                 days_range = st.sidebar.slider(
                     "Days Left Range:",
                     min_value=max(min_days, 0),
