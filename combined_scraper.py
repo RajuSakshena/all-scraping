@@ -9,8 +9,7 @@ from dev import scrape_devnetjobs
 from nasscom import scrape_nasscom
 from wri import fetch_wri_opportunities
 from hcl import scrape_hcl
-from metro import fetch_metro_tenders # ✅ Added Metro import
-
+from metro import fetch_metro_tenders # <-- CRITICAL: Adding Metro import
 
 def run_combined_scraper():
     # Run NGOBOX
@@ -36,6 +35,7 @@ def run_combined_scraper():
             wri_df["Deadline"] = pd.NaT
             wri_df["Days_Left"] = pd.NA
             wri_df = wri_df.rename(columns={"Clickable_Link": "Clickable_Link"}) if "Clickable_Link" in wri_df.columns else wri_df
+            print(f"  -> WRI scraped {len(wri_df)} items.")
         else:
             wri_df = pd.DataFrame()
             print("⚠️ WRI returned no data.")
@@ -49,17 +49,20 @@ def run_combined_scraper():
         hcl_df = scrape_hcl()
         if hcl_df.empty:
             print("⚠️ HCL returned no data.")
+        else:
+            print(f"  -> HCL scraped {len(hcl_df)} items.")
     except Exception as e:
         print(f"❌ HCL scraper failed: {e}")
         hcl_df = pd.DataFrame()
     
-    # ✅ Run Metro Rail Tenders
+    # Run Metro Rail Tenders
     print("🔍 Running Nagpur Metro Rail scraper...")
     try:
-        # Assuming fetch_metro_tenders now returns a DataFrame with all final_columns
         metro_df = fetch_metro_tenders()
         if metro_df.empty:
             print("⚠️ Nagpur Metro Rail returned no data.")
+        else:
+            print(f"  -> Nagpur Metro Rail scraped {len(metro_df)} items.") # Added log
     except Exception as e:
         print(f"❌ Nagpur Metro Rail scraper failed: {e}")
         metro_df = pd.DataFrame()
@@ -77,8 +80,7 @@ def run_combined_scraper():
     nasscom_df = nasscom_df.reindex(columns=final_columns)
     wri_df = wri_df.reindex(columns=final_columns)
     hcl_df = hcl_df.reindex(columns=final_columns)
-    # ✅ Align Metro schema (though it should already be aligned by the updated metro.py)
-    metro_df = metro_df.reindex(columns=final_columns)
+    metro_df = metro_df.reindex(columns=final_columns) # <-- CRITICAL: Align Metro schema
 
     # Force Nasscom Days_Left blank
     if "Days_Left" in nasscom_df.columns:
@@ -86,8 +88,7 @@ def run_combined_scraper():
 
     # Merge everything
     combined_df = pd.concat(
-        # ✅ Added metro_df to the list of DataFrames to concatenate
-        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df],
+        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df], # <-- CRITICAL: Including metro_df
         ignore_index=True
     )
 
@@ -95,10 +96,8 @@ def run_combined_scraper():
         print("❌ No data found from any source.")
         return
 
-    # Ensure Clickable_Link cleaned
+    # Ensure Clickable_Link cleaned (kept for other scrapers)
     if "Clickable_Link" in combined_df.columns:
-        # The cleaning logic is kept to handle other scrapers, 
-        # but metro_df now includes the HYPERLINK formula
         combined_df["Clickable_Link"] = combined_df.apply(
             lambda row: row["Clickable_Link"]
             if pd.notna(row["Clickable_Link"]) and "HYPERLINK" in str(row["Clickable_Link"])
