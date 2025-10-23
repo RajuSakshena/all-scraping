@@ -9,7 +9,7 @@ from dev import scrape_devnetjobs
 from nasscom import scrape_nasscom
 from wri import fetch_wri_opportunities
 from hcl import scrape_hcl
-from metro import fetch_metro_tenders # <-- CRITICAL: Adding Metro import
+from metro import fetch_metro_tenders  # CRITICAL: Metro import added
 
 def run_combined_scraper():
     # Run NGOBOX
@@ -62,7 +62,8 @@ def run_combined_scraper():
         if metro_df.empty:
             print("⚠️ Nagpur Metro Rail returned no data.")
         else:
-            print(f"  -> Nagpur Metro Rail scraped {len(metro_df)} items.") # Added log
+            # Added log to verify row count for Metro Rail
+            print(f"  -> Nagpur Metro Rail scraped {len(metro_df)} items.")
     except Exception as e:
         print(f"❌ Nagpur Metro Rail scraper failed: {e}")
         metro_df = pd.DataFrame()
@@ -80,15 +81,15 @@ def run_combined_scraper():
     nasscom_df = nasscom_df.reindex(columns=final_columns)
     wri_df = wri_df.reindex(columns=final_columns)
     hcl_df = hcl_df.reindex(columns=final_columns)
-    metro_df = metro_df.reindex(columns=final_columns) # <-- CRITICAL: Align Metro schema
+    metro_df = metro_df.reindex(columns=final_columns) # Align Metro schema
 
     # Force Nasscom Days_Left blank
     if "Days_Left" in nasscom_df.columns:
         nasscom_df["Days_Left"] = pd.NA
 
-    # Merge everything
+    # Merge everything, INCLUDING metro_df
     combined_df = pd.concat(
-        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df], # <-- CRITICAL: Including metro_df
+        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df],
         ignore_index=True
     )
 
