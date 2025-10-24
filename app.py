@@ -10,9 +10,8 @@ st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 # Title and description
 st.title("📊 Grants & RFP Combined Scraper")
 st.markdown("""
-This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, 
-**HCL Foundation**, and **Nagpur Metro Rail (New)**, merges results, categorizes them,
-and sorts by soonest deadlines (`Days_Left`).
+This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, **HCL Foundation**, 
+and **Nagpur Metro Rail (New)**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
 """)
 
 # Button to trigger scraping
@@ -42,7 +41,7 @@ if os.path.exists("all_grants.xlsx"):
                     return pd.NA
             df["Days_Left"] = df["Deadline"].apply(compute_days_left)
 
-        # Convert Days_Left to numeric
+        # Convert Days_Left to numeric and round to integers
         df["Days_Left"] = pd.to_numeric(df["Days_Left"], errors="coerce")
         df["Days_Left"] = df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
 
@@ -72,9 +71,10 @@ if os.path.exists("all_grants.xlsx"):
         if selected_sources:
             filtered_df = filtered_df[filtered_df["Source"].isin(selected_sources)]
 
-        # Days Left slider
+        # Days Left slider (exclude Nasscom and WRI if only they are selected)
         if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
             if not filtered_df["Days_Left"].dropna().empty:
+                # Handle potential NA values gracefully when determining min/max
                 valid_days = filtered_df["Days_Left"].dropna()
                 if not valid_days.empty:
                     min_days = int(valid_days.min()) if not pd.isna(valid_days.min()) else 0
@@ -82,6 +82,7 @@ if os.path.exists("all_grants.xlsx"):
                 else:
                     min_days, max_days = 0, 365
 
+                # Adjust max_days for display if placeholder values are large
                 if max_days > 365:
                     max_days = 365
                 
@@ -105,22 +106,18 @@ if os.path.exists("all_grants.xlsx"):
             st.write(filtered_df["Source"].value_counts())
             st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
 
-            # --- Make clickable link column ---
+            # ✅ Make Clickable_Link visible and clickable
             if "Clickable_Link" in filtered_df.columns:
                 filtered_df["Clickable_Link"] = filtered_df["Clickable_Link"].apply(
                     lambda x: f'<a href="{x}" target="_blank" style="color:#1f77b4; font-weight:600; text-decoration:none;">🔗 Open Link</a>'
                     if pd.notna(x) else ""
                 )
 
-            # Convert DataFrame to HTML (with clickable links)
-            html_table = filtered_df.to_html(
-                escape=False,
-                index=False,
-                justify="left"
+            # Convert to HTML with clickable links
+            st.markdown(
+                filtered_df.to_html(escape=False, index=False),
+                unsafe_allow_html=True
             )
-
-            # Display table with clickable links
-            st.markdown(html_table, unsafe_allow_html=True)
 
         # Download button
         with open("all_grants.xlsx", "rb") as f:
