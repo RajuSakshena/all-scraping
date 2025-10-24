@@ -1,141 +1,130 @@
-import requests
+import streamlit as st
 import pandas as pd
-from bs4 import BeautifulSoup
-import json, os, re, string
-from openpyxl import load_workbook
-from openpyxl.styles import Alignment
+from combined_scraper import run_combined_scraper
 from datetime import datetime
+import os
 
-# === Embedded Keywords Dictionary ===
-keywords = {
-  "Governance": [
-    "governance", "policy", "capacity building", "municipal", "M&E", "fiscal",
-    "monitoring and evaluation", "social audits", "fundraising", "management",
-    "consulting", "administration", "public", "government", "capacity",
-    "impact", "evaluation", "dashboard", "data"
-  ],
-  "Learning": [
-    "education", "skill", "training", "life skills", "TVET", "student",
-    "learning by doing", "contextualized learning", "teaching", "development",
-    "curriculum", "schools", "colleges", "educational institutes", "AI",
-    "skilling"
-  ],
-  "Safety": [
-    "gender", "safety", "equity", "mobility", "transport", "sexual", "health",
-    "responsive", "institutional safety", "SAFER", "security", "protection",
-    "wellbeing", "wellness", "happiness", "access", "accessibility", "child",
-    "children", "LGBTQ", "queer", "sexuality education", "personal","protection",
-    "empowerment", "design"
-  ],
-  "Climate": [
-    "climate", "resilience", "environment", "disaster", "sustainability", "green",
-    "climate adaptation", "democratize climate", "ecology", "conservation",
-    "renewable", "pollution", "energy", "climate mitigation", "green buildings",
-    "greening education", "CDRI", "disaster management", "disaster resilience",
-    "flood", "heat", "heat islands"
-  ]
-}
-# ==================================
+# Streamlit page configuration
+st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 
-priority = ["Governance", "Learning", "Safety", "Climate"]
+# Title and description
+st.title("📊 Grants & RFP Combined Scraper")
+st.markdown("""
+This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, **HCL Foundation**, 
+and **Nagpur Metro Rail (New)**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
+""")
 
-BASE_URL = "https://www.metrorailnagpur.com"
-URL = f"{BASE_URL}/tenders"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# Button to trigger scraping
+if st.button("🔄 Run Scraper"):
+    with st.spinner("Scraping in progress... please wait ⏳"):
+        try:
+            run_combined_scraper()
+            st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
+        except Exception as e:
+            st.error(f"❌ Scraping failed: {e}")
+            st.info("Please try again or check the logs for details.")
 
-def fetch_metro_tenders():
-    print(f"🔍 Fetching tenders from: {URL}")
-    tenders = []
+# Display data if Excel exists
+if os.path.exists("all_grants.xlsx"):
     try:
-        res = requests.get(URL, headers=HEADERS, timeout=10)
-        soup = BeautifulSoup(res.text, "html.parser")
+        df = pd.read_excel("all_grants.xlsx")
 
-        seen_links = set()
+        # Ensure Days_Left column exists and is numeric
+        if "Days_Left" not in df.columns:
+            def compute_days_left(deadline):
+                try:
+                    dt = pd.to_datetime(deadline, errors="coerce")
+                    if pd.isna(dt):
+                        return pd.NA
+                    return (dt.date() - datetime.today().date()).days
+                except:
+                    return pd.NA
+            df["Days_Left"] = df["Deadline"].apply(compute_days_left)
 
-        # Targeting the table data cells that contain the tender info
-        blocks = soup.find_all("td", class_="numeric")
-        if not blocks:
-            print("⚠️ No tender blocks found.")
-            return pd.DataFrame() # Return empty DataFrame on failure
+        # Convert Days_Left to numeric and round to integers
+        df["Days_Left"] = pd.to_numeric(df["Days_Left"], errors="coerce")
+        df["Days_Left"] = df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
 
-        for block in blocks:
-            # Tender title
-            header_span = block.find("span", style=lambda s: s and "display:table-cell" in s)
-            tender_title = header_span.get_text(strip=True) if header_span else "N/A"
+        # Sidebar filters
+        st.sidebar.header("Filters")
 
-            # Full description
-            desc_parts = []
-            for element in block.contents:
-                if element.name == "table":
-                    break
-                if isinstance(element, str):
-                    text = element.strip()
+        # Vertical filter
+        verticals = sorted(df["Matched_Vertical"].dropna().unique())
+        selected_verticals = st.sidebar.multiselect(
+            "Filter by Vertical:",
+            options=verticals,
+            default=[]
+        )
+
+        # Source filter
+        sources = sorted(df["Source"].dropna().unique())
+        selected_sources = st.sidebar.multiselect(
+            "Filter by Source:",
+            options=sources,
+            default=[]
+        )
+
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_verticals:
+            filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(selected_verticals)]
+        if selected_sources:
+            filtered_df = filtered_df[filtered_df["Source"].isin(selected_sources)]
+
+        # Days Left slider (exclude Nasscom and WRI if only they are selected)
+        if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
+            if not filtered_df["Days_Left"].dropna().empty:
+                # Handle potential NA values gracefully when determining min/max
+                valid_days = filtered_df["Days_Left"].dropna()
+                if not valid_days.empty:
+                    min_days = int(valid_days.min()) if not pd.isna(valid_days.min()) else 0
+                    max_days = int(valid_days.max()) if not pd.isna(valid_days.max()) else 365
                 else:
-                    text = element.get_text(strip=True, separator=" ")
-                if text:
-                    desc_parts.append(text)
-            full_description = " ".join(desc_parts).strip()
-            tender_full_title = f"{tender_title} — {full_description}"
+                    min_days, max_days = 0, 365
 
-            # Inner table with links
-            inner_table = block.find("table")
-            if not inner_table:
-                continue
-
-            for a_tag in inner_table.find_all("a", href=True):
-                doc_name = a_tag.get_text(strip=True)
-                link = a_tag["href"].strip()
-                if link and not link.startswith("http"):
-                    link = f"{BASE_URL}/{link.lstrip('/')}"
-                if link in seen_links:
-                    continue
-                seen_links.add(link)
-
-                # Strict keyword matching
-                text_blob = full_description.lower()
-                text_blob_clean = text_blob.translate(str.maketrans('', '', string.punctuation))
-                matched_verticals = []
-
-                for vertical in priority:
-                    for word in keywords.get(vertical, []):
-                        word_lower = word.lower()
-                        if re.search(r'\b{}\b'.format(re.escape(word_lower)), text_blob_clean):
-                            matched_verticals.append(vertical)
-                            break
+                # Adjust max_days for display if placeholder values are large
+                if max_days > 365:
+                    max_days = 365
                 
-                # Only include tenders with at least one matched vertical
-                if matched_verticals:
-                    tenders.append({
-                        # --- Columns from original scraper ---
-                        "Title": tender_full_title,
-                        "Description": doc_name,
-                        "Matched_Vertical": ", ".join(matched_verticals),
-                        "Clickable_Link": '=HYPERLINK("{}","{}")'.format(link, doc_name.replace('"', '""')),
-                        
-                        # --- Columns for combined_scraper alignment (set to default/null) ---
-                        "Source": "Nagpur Metro Rail",
-                        "Type": "Tender/RFP",
-                        "How_to_Apply": f"Refer to the documents linked: {link}",
-                        "Deadline": pd.NaT, # Not available, use pandas NaT (Not a Time)
-                        "Days_Left": pd.NA # Not available, use pandas NA (Not Applicable)
-                    })
+                days_range = st.sidebar.slider(
+                    "Days Left Range:",
+                    min_value=max(min_days, 0),
+                    max_value=max_days,
+                    value=(0, min(60, max_days)),
+                    step=1
+                )
+                filtered_df = filtered_df[
+                    (filtered_df["Days_Left"].fillna(999) >= days_range[0]) &
+                    (filtered_df["Days_Left"].fillna(999) <= days_range[1])
+                ]
 
-        print(f"✅ Found {len(tenders)} matched tender documents.")
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(tenders)
-        return df
-    
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Network or request error during scraping: {e}")
-        return pd.DataFrame() # Return empty DataFrame on error
+        # Display summary
+        st.write("### 📊 Breakdown by Source")
+        if filtered_df.empty:
+            st.warning("⚠️ No data matches the selected filters.")
+        else:
+            st.write(filtered_df["Source"].value_counts())
+            st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
+
+            # Display styled dataframe (hide Clickable_Link for cleaner UI)
+            display_df = filtered_df.drop(columns=["Clickable_Link"], errors="ignore")
+            st.dataframe(
+                display_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm", vmin=0, vmax=60),
+                use_container_width=True,
+                height=600
+            )
+
+        # Download button
+        with open("all_grants.xlsx", "rb") as f:
+            st.download_button(
+                label="⬇️ Download as Excel",
+                data=f,
+                file_name="all_grants.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
     except Exception as e:
-        print(f"❌ An unexpected error occurred: {e}")
-        return pd.DataFrame() # Return empty DataFrame on error
-
-# The save_to_excel function is removed as combined_scraper.py handles saving.
-if __name__ == "__main__":
-    # Test the function, will now return a DataFrame
-    data_df = fetch_metro_tenders()
-    print(data_df.head()) # Print a preview of the structured data
-    print(f"Total rows: {len(data_df)}")
+        st.error(f"❌ Error loading data: {e}")
+        st.info("Please run the scraper again to generate fresh data.")
+else:
+    st.info("ℹ️ No data yet. Click **Run Scraper** to generate.")
