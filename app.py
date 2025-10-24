@@ -106,17 +106,12 @@ if os.path.exists("all_grants.xlsx"):
             st.write(filtered_df["Source"].value_counts())
             st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
 
-            # ✅ Make Clickable_Link visible and clickable
-            if "Clickable_Link" in filtered_df.columns:
-                filtered_df["Clickable_Link"] = filtered_df["Clickable_Link"].apply(
-                    lambda x: f'<a href="{x}" target="_blank" style="color:#1f77b4; font-weight:600; text-decoration:none;">🔗 Open Link</a>'
-                    if pd.notna(x) else ""
-                )
-
-            # Convert to HTML with clickable links
-            st.markdown(
-                filtered_df.to_html(escape=False, index=False),
-                unsafe_allow_html=True
+            # Display styled dataframe (hide Clickable_Link for cleaner UI)
+            display_df = filtered_df.drop(columns=["Clickable_Link"], errors="ignore")
+            st.dataframe(
+                display_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm", vmin=0, vmax=60),
+                use_container_width=True,
+                height=600
             )
 
         # Download button
