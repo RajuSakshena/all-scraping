@@ -11,6 +11,10 @@ from wri import fetch_wri_opportunities
 from hcl import scrape_hcl
 from metro import fetch_metro_tenders  # CRITICAL: Metro import added
 
+# ✅ NIUA IMPORT ADDED (NO EXISTING IMPORT REMOVED)
+from niua_tenders import scrape_niua_tenders
+
+
 def run_combined_scraper():
     # Run NGOBOX
     print("🔍 Running NGOBOX scraper...")
@@ -62,11 +66,34 @@ def run_combined_scraper():
         if metro_df.empty:
             print("⚠️ Nagpur Metro Rail returned no data.")
         else:
-            # Added log to verify row count for Metro Rail
             print(f"  -> Nagpur Metro Rail scraped {len(metro_df)} items.")
     except Exception as e:
         print(f"❌ Nagpur Metro Rail scraper failed: {e}")
         metro_df = pd.DataFrame()
+
+    # ✅ RUN NIUA SCRAPER (ADDED, NOTHING REMOVED)
+    print("🔍 Running NIUA Tenders scraper...")
+    try:
+        niua_raw_df = scrape_niua_tenders()
+        if niua_raw_df.empty:
+            print("⚠️ NIUA returned no data.")
+            niua_df = pd.DataFrame()
+        else:
+            print(f"  -> NIUA scraped {len(niua_raw_df)} items.")
+            niua_df = pd.DataFrame({
+                "Source": "NIUA",
+                "Type": "Tender",
+                "Title": niua_raw_df["Tender_Title"],
+                "Description": pd.NA,
+                "How_to_Apply": pd.NA,
+                "Matched_Vertical": pd.NA,
+                "Deadline": niua_raw_df["Submission_Deadline"],
+                "Days_Left": pd.NA,
+                "Clickable_Link": niua_raw_df["Tender_Link"]
+            })
+    except Exception as e:
+        print(f"❌ NIUA scraper failed: {e}")
+        niua_df = pd.DataFrame()
 
     # --- Final Schema Alignment and Merging ---
     final_columns = [
@@ -81,15 +108,16 @@ def run_combined_scraper():
     nasscom_df = nasscom_df.reindex(columns=final_columns)
     wri_df = wri_df.reindex(columns=final_columns)
     hcl_df = hcl_df.reindex(columns=final_columns)
-    metro_df = metro_df.reindex(columns=final_columns) # Align Metro schema
+    metro_df = metro_df.reindex(columns=final_columns)  # Align Metro schema
+    niua_df = niua_df.reindex(columns=final_columns)    # ✅ NIUA ALIGNMENT ADDED
 
     # Force Nasscom Days_Left blank
     if "Days_Left" in nasscom_df.columns:
         nasscom_df["Days_Left"] = pd.NA
 
-    # Merge everything, INCLUDING metro_df
+    # Merge everything, INCLUDING metro_df AND niua_df
     combined_df = pd.concat(
-        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df],
+        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df, niua_df],
         ignore_index=True
     )
 
