@@ -11,7 +11,8 @@ st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
 st.title("📊 Grants & RFP Combined Scraper")
 st.markdown("""
 This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, **HCL Foundation**, 
-and **Nagpur Metro Rail (New)**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
+and **Nagpur Metro Rail (New)**,**Niua
+**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
 """)
 
 # Button to trigger scraping
@@ -128,3 +129,4 @@ if os.path.exists("all_grants.xlsx"):
         st.info("Please run the scraper again to generate fresh data.")
 else:
     st.info("ℹ️ No data yet. Click **Run Scraper** to generate.")
+
