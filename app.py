@@ -3,119 +3,165 @@ import pandas as pd
 from combined_scraper import run_combined_scraper
 from datetime import datetime
 import os
+import base64
 
-# Streamlit page configuration
-st.set_page_config(page_title="Grants & RFP Scraper", layout="wide")
+# ------------------------------------------------------
+# Streamlit Page Config
+# ------------------------------------------------------
+st.set_page_config(page_title="ImpactStream - Grants Scraper", layout="wide")
 
-# Title and description
-st.title("📊 Grants & RFP Combined Scraper")
+# ------------------------------------------------------
+# Logo Loading
+# ------------------------------------------------------
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+logo_path = os.path.join(APP_DIR, "TMI.png")
+logo_base64 = ""
+
+try:
+    with open(logo_path, "rb") as f:
+        logo_base64 = base64.b64encode(f.read()).decode()
+except:
+    pass
+
+# ------------------------------------------------------
+# GLOBAL CSS
+# ------------------------------------------------------
 st.markdown("""
-This app scrapes **NGOBOX**, **DevNetJobsIndia**, **Nasscom Foundation**, **WRI India**, **HCL Foundation**, 
-and **Nagpur Metro Rail (New)**,**Niua
-**, merges results, categorizes them, and sorts by soonest deadlines (`Days_Left`).
-""")
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+.stApp { background-color: white !important; font-family: 'Inter', sans-serif; }
 
-# Button to trigger scraping
-if st.button("🔄 Run Scraper"):
-    with st.spinner("Scraping in progress... please wait ⏳"):
-        try:
-            run_combined_scraper()
-            st.success("✅ Scraping completed! Data saved to `all_grants.xlsx`.")
-        except Exception as e:
-            st.error(f"❌ Scraping failed: {e}")
-            st.info("Please try again or check the logs for details.")
+.block-container {
+    padding-top: 1rem !important;
+    padding-left: 0rem !important;
+    padding-right: 0rem !important;
+}
 
-# Display data if Excel exists
-if os.path.exists("all_grants.xlsx"):
-    try:
+.navbar {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:0.8rem 5%;
+    background:white;
+}
+
+.logo-container {
+    width:150px;
+    height:50px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border:1px solid #e0e0e0;
+    border-radius:4px;
+    background:white;
+}
+
+.logo-container img {
+    max-height:40px;
+    object-fit:contain;
+}
+
+.hero {
+    background:#083a5c;
+    text-align:center;
+    padding:60px 10px;
+    color:white;
+}
+
+footer {
+    background:#003055;
+    color:#cbd5e1;
+    padding:4rem 5% 2rem;
+    margin-top:4rem;
+}
+
+.footer-grid {
+    display:grid;
+    grid-template-columns:1.5fr 1fr 1fr 1.5fr;
+    gap:2rem;
+    margin-bottom:3rem;
+}
+
+.footer-col h4 { color:white; }
+.footer-col a { color:#cbd5e1; text-decoration:none; }
+.footer-col a:hover { color:#58a648; }
+
+.footer-bottom {
+    border-top:1px solid rgba(255,255,255,0.1);
+    padding-top:2rem;
+    text-align:center;
+    font-size:0.9rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------
+# NAVBAR
+# ------------------------------------------------------
+st.markdown(f"""
+<nav class="navbar">
+    <div class="logo-container">
+        <img src="data:image/png;base64,{logo_base64}">
+    </div>
+</nav>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------
+# HERO
+# ------------------------------------------------------
+st.markdown("""
+<div class="hero">
+    <h1>ImpactStream</h1>
+    <p>We find the funding. You do the work.</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ------------------------------------------------------
+# CENTER CONTENT
+# ------------------------------------------------------
+col1, col2, col3 = st.columns([1,2,1])
+
+with col2:
+
+    st.markdown("<h1 style='text-align:center;'>📊 Grants & RFP Combined Scraper</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;'>Scrapes NGOBOX, DevNetJobsIndia, Nasscom Foundation, WRI India, HCL Foundation, Nagpur Metro Rail, NIUA and more.</p>", unsafe_allow_html=True)
+
+    # Run Scraper Button
+    if st.button("🔄 Run Scraper"):
+        with st.spinner("Scraping in progress..."):
+            try:
+                run_combined_scraper()
+                st.success("✅ Scraping completed! Data saved to all_grants.xlsx")
+            except Exception as e:
+                st.error(f"❌ Scraping failed: {e}")
+
+    # Display Data
+    if os.path.exists("all_grants.xlsx"):
+
         df = pd.read_excel("all_grants.xlsx")
 
-        # Ensure Days_Left column exists and is numeric
         if "Days_Left" not in df.columns:
             def compute_days_left(deadline):
                 try:
                     dt = pd.to_datetime(deadline, errors="coerce")
-                    if pd.isna(dt):
-                        return pd.NA
+                    if pd.isna(dt): return None
                     return (dt.date() - datetime.today().date()).days
                 except:
-                    return pd.NA
+                    return None
+
             df["Days_Left"] = df["Deadline"].apply(compute_days_left)
 
-        # Convert Days_Left to numeric and round to integers
         df["Days_Left"] = pd.to_numeric(df["Days_Left"], errors="coerce")
-        df["Days_Left"] = df["Days_Left"].apply(lambda x: int(x) if pd.notna(x) else x)
 
-        # Sidebar filters
-        st.sidebar.header("Filters")
+        st.markdown("### 📊 Breakdown by Source")
+        st.write(df["Source"].value_counts())
 
-        # Vertical filter
-        verticals = sorted(df["Matched_Vertical"].dropna().unique())
-        selected_verticals = st.sidebar.multiselect(
-            "Filter by Vertical:",
-            options=verticals,
-            default=[]
-        )
+        st.markdown(f"### 📑 Showing {len(df)} opportunities")
 
-        # Source filter
-        sources = sorted(df["Source"].dropna().unique())
-        selected_sources = st.sidebar.multiselect(
-            "Filter by Source:",
-            options=sources,
-            default=[]
-        )
+        display_df = df.drop(columns=["Clickable_Link"], errors="ignore")
 
-        # Apply filters
-        filtered_df = df.copy()
-        if selected_verticals:
-            filtered_df = filtered_df[filtered_df["Matched_Vertical"].isin(selected_verticals)]
-        if selected_sources:
-            filtered_df = filtered_df[filtered_df["Source"].isin(selected_sources)]
+        st.dataframe(display_df, use_container_width=True, height=600)
 
-        # Days Left slider (exclude Nasscom and WRI if only they are selected)
-        if not (set(selected_sources).issubset({"Nasscom", "WRI"})):
-            if not filtered_df["Days_Left"].dropna().empty:
-                # Handle potential NA values gracefully when determining min/max
-                valid_days = filtered_df["Days_Left"].dropna()
-                if not valid_days.empty:
-                    min_days = int(valid_days.min()) if not pd.isna(valid_days.min()) else 0
-                    max_days = int(valid_days.max()) if not pd.isna(valid_days.max()) else 365
-                else:
-                    min_days, max_days = 0, 365
-
-                # Adjust max_days for display if placeholder values are large
-                if max_days > 365:
-                    max_days = 365
-                
-                days_range = st.sidebar.slider(
-                    "Days Left Range:",
-                    min_value=max(min_days, 0),
-                    max_value=max_days,
-                    value=(0, min(60, max_days)),
-                    step=1
-                )
-                filtered_df = filtered_df[
-                    (filtered_df["Days_Left"].fillna(999) >= days_range[0]) &
-                    (filtered_df["Days_Left"].fillna(999) <= days_range[1])
-                ]
-
-        # Display summary
-        st.write("### 📊 Breakdown by Source")
-        if filtered_df.empty:
-            st.warning("⚠️ No data matches the selected filters.")
-        else:
-            st.write(filtered_df["Source"].value_counts())
-            st.write(f"### 📑 Showing {len(filtered_df)} opportunities")
-
-            # Display styled dataframe (hide Clickable_Link for cleaner UI)
-            display_df = filtered_df.drop(columns=["Clickable_Link"], errors="ignore")
-            st.dataframe(
-                display_df.style.background_gradient(subset=["Days_Left"], cmap="coolwarm", vmin=0, vmax=60),
-                use_container_width=True,
-                height=600
-            )
-
-        # Download button
         with open("all_grants.xlsx", "rb") as f:
             st.download_button(
                 label="⬇️ Download as Excel",
@@ -124,9 +170,38 @@ if os.path.exists("all_grants.xlsx"):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    except Exception as e:
-        st.error(f"❌ Error loading data: {e}")
-        st.info("Please run the scraper again to generate fresh data.")
-else:
-    st.info("ℹ️ No data yet. Click **Run Scraper** to generate.")
+    else:
+        st.info("ℹ️ No data yet. Click Run Scraper to generate.")
 
+# ------------------------------------------------------
+# FOOTER
+# ------------------------------------------------------
+st.markdown(f"""
+<footer>
+    <div class="footer-grid">
+        <div class="footer-col">
+            <img src="data:image/png;base64,{logo_base64}" style="height:50px;">
+            <p>The Metropolitan Institute is a think-and-do tank dedicated to building aspirational and resilient regions.</p>
+        </div>
+        <div class="footer-col">
+            <h4>Quick Links</h4>
+            <p><a href="about.html">About Us</a></p>
+            <p><a href="research.html">Our Research</a></p>
+            <p><a href="contact.html">Contact</a></p>
+        </div>
+        <div class="footer-col">
+            <h4>Connect</h4>
+            <p><a href="https://x.com/TheMetroInst">Twitter / X</a></p>
+            <p><a href="https://www.linkedin.com/company/the-metropolitan-institute">LinkedIn</a></p>
+            <p><a href="https://www.instagram.com/themetropolitaninstitute">Instagram</a></p>
+        </div>
+        <div class="footer-col">
+            <h4>Support Our Mission</h4>
+            <p>Help us bridge the gap between policy and people.</p>
+        </div>
+    </div>
+    <div class="footer-bottom">
+        © 2025 The Metropolitan Institute. All Rights Reserved.
+    </div>
+</footer>
+""", unsafe_allow_html=True)
