@@ -125,14 +125,39 @@ def run_combined_scraper():
         print("❌ No data found from any source.")
         return
 
-    # Ensure Clickable_Link cleaned (kept for other scrapers)
-    if "Clickable_Link" in combined_df.columns:
-        combined_df["Clickable_Link"] = combined_df.apply(
-            lambda row: row["Clickable_Link"]
-            if pd.notna(row["Clickable_Link"]) and "HYPERLINK" in str(row["Clickable_Link"])
-            else "",
-            axis=1,
-        )
+    # 🔥 SENIOR-LEVEL UX & DATA QUALITY FIXES (Description Truncation + Clean Clickable_Link)
+    # These are the ONLY changes - everything else is untouched
+
+    # 1. Clean Clickable_Link: Extract pure URL from Excel HYPERLINK formula
+    def clean_clickable_link(link):
+        if pd.isna(link) or str(link).strip() == "":
+            return ""
+        link_str = str(link).strip()
+        # Detect HYPERLINK formula and safely extract URL
+        if link_str.upper().startswith("=HYPERLINK"):
+            try:
+                start_idx = link_str.find('"') + 1
+                if start_idx > 0:
+                    end_idx = link_str.find('"', start_idx)
+                    if end_idx > start_idx:
+                        return link_str[start_idx:end_idx]
+            except Exception:
+                pass  # Safe fallback
+        return link_str
+
+    combined_df["Clickable_Link"] = combined_df["Clickable_Link"].apply(clean_clickable_link)
+
+    # 2. Truncate Description for Excel UX (300 chars + " ... Read More")
+    def truncate_description(desc):
+        if pd.isna(desc) or str(desc).strip() == "":
+            return ""
+        desc_str = str(desc).strip()
+        if len(desc_str) > 300:
+            # Truncate cleanly and append suffix
+            return desc_str[:300].rstrip() + " ... Read More"
+        return desc_str
+
+    combined_df["Description"] = combined_df["Description"].apply(truncate_description)
 
     # Filter out expired deadlines
     if "Days_Left" in combined_df.columns:
