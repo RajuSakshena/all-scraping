@@ -1,13 +1,13 @@
-name: Daily Combined Scraper
+name: Run Combined Scraper
 
 on:
-  # 👇 Manual run button (Action tab)
+  # 👇 Manual run button (Actions tab)
   workflow_dispatch:
 
   # 👇 Daily automatic run
   schedule:
-    # GitHub uses UTC time
-    # India 2 AM = 20:30 UTC (previous day)
+    # GitHub cron uses UTC
+    # India 2:00 AM = 20:30 UTC (previous day)
     - cron: "30 20 * * *"
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -27,15 +27,15 @@ jobs:
         run: |
           pip install pandas openpyxl requests beautifulsoup4
 
-      - name: Run Combined Scraper
+      - name: Run combined scraper
         run: |
           python combined_scraper.py
 
-      # 👇 Auto save + overwrite excel in repo
-      - name: Commit updated Excel
+      # 👇 Excel auto save + overwrite in repo
+      - name: Commit updated Excel file
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           git add all_grants.xlsx
-          git commit -m "Auto update excel file" || echo "No changes to commit"
+          git commit -m "Auto update excel file" || echo "No changes"
           git push
