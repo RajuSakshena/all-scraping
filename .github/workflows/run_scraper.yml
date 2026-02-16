@@ -1,13 +1,17 @@
 name: Run Combined Scraper
 
+# 👇 REQUIRED for git push permission (fixes 403 error)
+permissions:
+  contents: write
+
 on:
-  # 👇 Manual run button (Actions tab)
+  # Manual run from Actions tab
   workflow_dispatch:
 
-  # 👇 Daily automatic run
+  # Daily auto run
   schedule:
-    # GitHub cron uses UTC
-    # India 2:00 AM = 20:30 UTC (previous day)
+    # GitHub uses UTC time
+    # India 2:00 AM = 20:30 UTC
     - cron: "30 20 * * *"
 
 jobs:
@@ -27,15 +31,21 @@ jobs:
         run: |
           pip install pandas openpyxl requests beautifulsoup4
 
-      - name: Run combined scraper
+      - name: Run Combined Scraper
         run: |
           python combined_scraper.py
 
-      # 👇 Excel auto save + overwrite in repo
+      # 👇 Commit only if Excel changed (SMART COMMIT)
       - name: Commit updated Excel file
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
+
           git add all_grants.xlsx
-          git commit -m "Auto update excel file" || echo "No changes"
-          git push
+
+          if git diff --staged --quiet; then
+            echo "No changes detected, skipping commit."
+          else
+            git commit -m "Auto update excel file"
+            git push
+          fi
