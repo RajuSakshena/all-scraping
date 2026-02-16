@@ -1,7 +1,14 @@
-name: Run Combined Scraper
+name: Daily Combined Scraper
 
 on:
-  workflow_dispatch:   # 👈 Action tab se manual run button
+  # 👇 Manual run button (Action tab)
+  workflow_dispatch:
+
+  # 👇 Daily automatic run
+  schedule:
+    # GitHub uses UTC time
+    # India 2 AM = 20:30 UTC (previous day)
+    - cron: "30 20 * * *"
 
 jobs:
   run-scraper:
@@ -24,8 +31,11 @@ jobs:
         run: |
           python combined_scraper.py
 
-      - name: Upload Excel File
-        uses: actions/upload-artifact@v4
-        with:
-          name: combined-excel
-          path: all_grants.xlsx
+      # 👇 Auto save + overwrite excel in repo
+      - name: Commit updated Excel
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add all_grants.xlsx
+          git commit -m "Auto update excel file" || echo "No changes to commit"
+          git push
