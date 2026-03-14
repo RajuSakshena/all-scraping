@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, send_file
+from flask import Flask, render_template_string, send_file, jsonify
 import requests
 import pandas as pd
 import io
@@ -14,7 +14,7 @@ cached_df = None
 last_fetch_time = 0
 
 # Auto refresh time (seconds)
-CACHE_DURATION = 600   # 600 sec = 10 minutes
+CACHE_DURATION = 600   # 10 minutes
 
 
 def get_excel_data():
@@ -22,7 +22,7 @@ def get_excel_data():
 
     current_time = time.time()
 
-    # Reload if cache expired or first time
+    # Reload if cache expired
     if cached_df is None or (current_time - last_fetch_time) > CACHE_DURATION:
 
         response = requests.get(EXCEL_URL)
@@ -43,6 +43,9 @@ def home():
     return "Flask App Running"
 
 
+# ===============================
+# EXCEL DOWNLOAD
+# ===============================
 @app.route("/download")
 def download_excel():
     try:
@@ -62,6 +65,25 @@ def download_excel():
         return f"Download Error: {str(e)}", 500
 
 
+# ===============================
+# JSON API
+# ===============================
+@app.route("/jobs-json")
+def jobs_json():
+    try:
+        df = get_excel_data()
+
+        data = df.to_dict(orient="records")
+
+        return jsonify(data)
+
+    except Exception as e:
+        return {"error": str(e)}, 500
+
+
+# ===============================
+# DASHBOARD PAGE
+# ===============================
 @app.route("/jobs")
 def jobs_dashboard():
     try:
@@ -82,6 +104,11 @@ def jobs_dashboard():
                 h2 {{
                     margin-bottom: 15px;
                 }}
+
+                .button-group {{
+                    margin-bottom: 20px;
+                }}
+
                 .download-btn {{
                     background: #58a648;
                     color: white;
@@ -89,10 +116,13 @@ def jobs_dashboard():
                     border-radius: 6px;
                     text-decoration: none;
                     font-weight: bold;
+                    margin-right: 10px;
                 }}
+
                 .download-btn:hover {{
                     background: #0b3c5d;
                 }}
+
                 table {{
                     width: 100%;
                     border-collapse: collapse;
@@ -100,29 +130,43 @@ def jobs_dashboard():
                     font-size: 14px;
                     background: white;
                 }}
+
                 th {{
                     background: #0b3c5d;
                     color: white;
                     padding: 8px;
                     text-align: left;
                 }}
+
                 td {{
                     padding: 6px;
                     border-bottom: 1px solid #ddd;
                 }}
+
                 tr:hover {{
                     background: #f2f2f2;
                 }}
             </style>
         </head>
+
         <body>
+
             <h2>Latest Job Listings</h2>
 
-            <a class="download-btn" href="/download">
-                Download Full Excel File
-            </a>
+            <div class="button-group">
+
+                <a class="download-btn" href="/download">
+                    Download Excel
+                </a>
+
+                <a class="download-btn" href="/jobs-json" target="_blank">
+                    Download JSON
+                </a>
+
+            </div>
 
             {table_html}
+
         </body>
         </html>
         """
