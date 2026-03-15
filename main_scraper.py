@@ -1,42 +1,38 @@
-import os, time, re
-import requests
+import time
+import re
 import pandas as pd
+import cloudscraper
 from bs4 import BeautifulSoup
-from openpyxl import load_workbook
-from openpyxl.styles import Alignment
-from datetime import datetime
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from dev import load_verticals, match_verticals, parse_deadline, format_deadline, compute_days_left
+from dev import load_verticals, match_verticals, format_deadline, compute_days_left
 
 URLS = {
     "Grants": "https://ngobox.org/grant_announcement_listing.php",
     "Tenders": "https://ngobox.org/rfp_eoi_listing.php"
 }
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9"
-}
-
-session = requests.Session()
-session.headers.update(HEADERS)
-
-# proxy to bypass GitHub runner block
-PROXY_PREFIX = "https://r.jina.ai/"
+# Create Cloudflare bypass scraper
+scraper = cloudscraper.create_scraper(
+    browser={
+        "browser": "chrome",
+        "platform": "windows",
+        "mobile": False
+    }
+)
 
 
 def safe_request(url):
     for attempt in range(3):
         try:
-            res = session.get(url, timeout=20, verify=False)
+            res = scraper.get(url, timeout=25)
 
             if res.status_code == 200:
                 return res
 
-            print(f"⚠️ Weak response ({res.status_code}) attempt {attempt+1}")
+            print(f"⚠️ Response {res.status_code} attempt {attempt+1}")
 
         except Exception as e:
             print(f"⚠️ Request error attempt {attempt+1}: {e}")
@@ -57,85 +53,53 @@ def extract_description_after_apply_by(soup):
         if strong and 'Apply By:' in strong.text:
 
             desc_parts = []
-            seen_lines = set()
 
             for sibling in h2.find_all_next():
 
                 if sibling.name == "div" and "row_section" in sibling.get("class", []):
-
-                    b_tag = sibling.find("b")
-
-                    if b_tag and b_tag.get_text(strip=True).lower() == "tags":
-                        break
+                    break
 
                 text_content = sibling.get_text(separator='\n', strip=True)
 
-                lines = text_content.split('\n')
-
-                unique_lines = [
-                    line.strip() for line in lines
-                    if line.strip() and line.strip() not in seen_lines
-                ]
-
-                if unique_lines:
-                    seen_lines.update(unique_lines)
-                    desc_parts.append('\n'.join(unique_lines))
+                if text_content:
+                    desc_parts.append(text_content)
 
             return "\n".join(desc_parts)
 
     return ''
 
 
-def extract_how_to_apply_from_html(description):
+def extract_how_to_apply(description):
 
-    if not description or not isinstance(description, str):
+    if not description:
         return "N/A"
 
-    custom_keywords = [
-        "Selection Criteria","Evaluation & Follow-Up","Application Guidelines",
-        "Eligible Applicants","Scope of Work","Proposal Requirements",
-        "Evaluation Criteria","Submission Details","Eligible Entities",
-        "How to apply","Purpose of RFP","Proposal Guidelines",
-        "Eligibility Criteria","Documents Required","Vendor Qualifications",
-        "Submission of Tender","Proposal Submission Guidelines"
+    keywords = [
+        "Selection Criteria",
+        "Evaluation",
+        "Application Guidelines",
+        "Eligible Applicants",
+        "Scope of Work",
+        "Proposal Requirements",
+        "Submission Details",
+        "How to apply",
+        "Eligibility Criteria",
+        "Documents Required"
     ]
 
-    norm_keywords = [kw.lower() for kw in custom_keywords]
+    norm_keywords = [k.lower() for k in keywords]
+
+    segments = re.split(r'(\.\s+|\n+)', description)
 
     matched_sections = []
 
-    segments = re.split(r'(\.\s+|\n+)', description)
-    segments = [s.strip() for s in segments if s.strip()]
+    for seg in segments:
 
-    i = 0
+        if any(k in seg.lower() for k in norm_keywords):
 
-    while i < len(segments):
+            matched_sections.append("• " + seg.strip())
 
-        segment = segments[i]
-        segment_lower = segment.lower()
-
-        if any(kw in segment_lower for kw in norm_keywords):
-
-            section = ["• " + segment]
-            i += 1
-
-            while i < len(segments):
-
-                next_segment = segments[i]
-                next_lower = next_segment.lower()
-
-                if any(kw in next_lower for kw in norm_keywords):
-                    break
-
-                section.append(next_segment)
-                i += 1
-
-            matched_sections.append(" ".join(section))
-
-        else:
-            i += 1
-
-    return "\n".join(matched_sections).strip() or "N/A"
+    return "\n".join(matched_sections) if matched_sections else "N/A"
 
 
 def fetch_opportunities(type_name, base_url, verticals):
@@ -148,10 +112,9 @@ def fetch_opportunities(type_name, base_url, verticals):
 
     while page <= MAX_PAGES:
 
-        raw_url = f"{base_url}?page={page}"
-        url = PROXY_PREFIX + raw_url
+        url = f"{base_url}?page={page}"
 
-        print(f"🔍 Scraping {type_name} Page {page} → {raw_url}")
+        print(f"🔍 Scraping {type_name} Page {page} → {url}")
 
         res = safe_request(url)
 
@@ -161,41 +124,30 @@ def fetch_opportunities(type_name, base_url, verticals):
 
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        # find opportunity links instead of card-block
-        links = soup.find_all("a", href=True)
+        cards = soup.select("div.card-block")
 
-        opportunity_links = []
-
-        for a in links:
-
-            href = a["href"]
-
-            if "/grant-details/" in href or "/rfp-details/" in href:
-
-                opportunity_links.append(a)
-
-        if not opportunity_links:
-
-            print(f"⚠️ No opportunities found on {type_name} Page {page}. Stopping.")
+        if not cards:
+            print(f"⚠️ No cards found on {type_name} Page {page}. Stopping.")
             break
 
-        for a in opportunity_links:
+        for card in cards:
 
-            href = a["href"].strip()
+            a = card.find("a", href=True)
 
-            link = href if href.startswith("http") else f"https://ngobox.org/{href.lstrip('/')}"
+            if not a:
+                continue
+
+            link = a["href"]
+
+            if not link.startswith("http"):
+                link = "https://ngobox.org/" + link.lstrip("/")
 
             title = a.get_text(strip=True)
-
-            if not title:
-                continue
 
             if link in seen_links:
                 continue
 
-            detail_url = PROXY_PREFIX + link
-
-            detail_res = safe_request(detail_url)
+            detail_res = safe_request(link)
 
             if not detail_res:
                 continue
@@ -216,9 +168,9 @@ def fetch_opportunities(type_name, base_url, verticals):
 
             description = BeautifulSoup(description_html, "html.parser").get_text(separator=" ", strip=True)
 
-            how_to_apply = extract_how_to_apply_from_html(description)
+            how_to_apply = extract_how_to_apply(description)
 
-            text_blob = (title + " " + description + " " + how_to_apply).lower()
+            text_blob = (title + " " + description).lower()
 
             matched_verticals = match_verticals(text_blob, verticals)
 
@@ -233,7 +185,7 @@ def fetch_opportunities(type_name, base_url, verticals):
                 "Matched_Vertical": ", ".join(sorted(set(matched_verticals))),
                 "Deadline": format_deadline(deadline),
                 "Days_Left": compute_days_left(deadline),
-                "Clickable_Link": '=HYPERLINK("{}","{}")'.format(link.replace('"','""'), title.replace('"','""'))
+                "Clickable_Link": f'=HYPERLINK("{link}","{title}")'
             })
 
             seen_links.add(link)
@@ -258,8 +210,6 @@ def scrape_ngobox():
 
     df = pd.DataFrame(all_data)
 
-    df = df[df["Clickable_Link"].notna() & (df["Clickable_Link"].str.strip() != "")]
-
     df["Source"] = "NGOBOX"
 
     if "Type" in df.columns:
@@ -270,4 +220,7 @@ def scrape_ngobox():
 
 
 if __name__ == "__main__":
-    print(scrape_ngobox().head())
+
+    df = scrape_ngobox()
+
+    print(df.head())
