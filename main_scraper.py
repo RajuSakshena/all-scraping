@@ -16,32 +16,28 @@ URLS = {
     "Tenders": "https://ngobox.org/rfp_eoi_listing.php"
 }
 
-# ✅ Real browser headers
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0",
     "Accept-Language": "en-US,en;q=0.9",
-    "Connection": "keep-alive",
-    "Referer": "https://www.google.com/"
+    "Connection": "keep-alive"
 }
 
 session = requests.Session()
 session.headers.update(HEADERS)
 
+# proxy prefix to bypass 403 on GitHub
+PROXY_PREFIX = "https://r.jina.ai/"
 
 def safe_request(url):
-    """Retry request for GitHub runner stability"""
     for attempt in range(3):
         try:
-            res = session.get(url, timeout=15, verify=False)
-
-            if res.status_code == 200 and len(res.text) > 2000:
+            res = session.get(url, timeout=20, verify=False)
+            if res.status_code == 200:
                 return res
-
-            print(f"⚠️ Weak response ({res.status_code}) attempt {attempt+1}")
-
+            else:
+                print(f"⚠️ Weak response ({res.status_code}) attempt {attempt+1}")
         except Exception as e:
-            print(f"⚠️ Request failed attempt {attempt+1}: {e}")
+            print(f"⚠️ Request error attempt {attempt+1}: {e}")
 
         time.sleep(3)
 
@@ -71,25 +67,28 @@ def extract_description_after_apply_by(soup):
 
 
 def extract_how_to_apply_from_html(description):
+
     if not description or not isinstance(description, str):
         return "N/A"
 
     custom_keywords = [
-        "Selection Criteria","Evaluation & Follow-Up","Application Guidelines",
-        "Eligible Applicants","Scope of Work","Proposal Requirements",
-        "Evaluation Criteria","Submission Details","Eligible Entities",
-        "How to apply","Purpose of RFP","Proposal Guidelines",
-        "Eligibility Criteria","Documents Required","Vendor Qualifications",
-        "Submission of Tender","Proposal Submission Guidelines"
+        "Selection Criteria", "Evaluation & Follow-Up", "Application Guidelines",
+        "Eligible Applicants:", "Scope of Work:", "Proposal Requirements",
+        "Evaluation Criteria", "Submission Details", "Eligible Entities",
+        "How to apply", "Purpose of RFP", "Proposal Guidelines",
+        "Eligibility Criteria", "Submission of Tender:", "Technical Bid",
+        "Documents Required", "Vendor Qualifications", "To apply"
     ]
 
-    norm_keywords = [kw.lower() for kw in custom_keywords]
+    norm_keywords = [kw.lower().rstrip(":") for kw in custom_keywords]
+
     matched_sections = []
 
     segments = re.split(r'(\.\s+|\n+)', description)
-    segments = [s.strip() for s in segments if s.strip()]
+    segments = [s.strip() for s in segments if s.strip() and not s.strip().startswith('.')]
 
     i = 0
+
     while i < len(segments):
 
         segment = segments[i]
@@ -103,9 +102,9 @@ def extract_how_to_apply_from_html(description):
             while i < len(segments):
 
                 next_segment = segments[i]
-                next_lower = next_segment.lower()
+                next_segment_lower = next_segment.lower()
 
-                if any(kw in next_lower for kw in norm_keywords):
+                if any(kw in next_segment_lower for kw in norm_keywords):
                     break
 
                 section.append(next_segment)
@@ -123,13 +122,18 @@ def fetch_opportunities(type_name, base_url, verticals):
 
     listings = []
     seen_links = set()
+
     page = 1
     MAX_PAGES = 5
 
     while page <= MAX_PAGES:
 
-        url = f"{base_url}?page={page}"
-        print(f"🔍 Scraping {type_name} Page {page} → {url}")
+        raw_url = f"{base_url}?page={page}"
+
+        # proxy url to bypass 403
+        url = PROXY_PREFIX + raw_url
+
+        print(f"🔍 Scraping {type_name} Page {page} → {raw_url}")
 
         res = safe_request(url)
 
@@ -142,7 +146,7 @@ def fetch_opportunities(type_name, base_url, verticals):
         cards = soup.find_all('div', class_='card-block')
 
         if not cards:
-            print(f"⚠️ No cards found on page {page}")
+            print(f"⚠️ No more cards found on {type_name} Page {page}. Stopping.")
             break
 
         for card in cards:
@@ -153,6 +157,7 @@ def fetch_opportunities(type_name, base_url, verticals):
                 continue
 
             href = a['href'].strip()
+
             link = href if href.startswith('http') else f"https://ngobox.org/{href.lstrip('/')}"
 
             title = a.get_text(strip=True)
@@ -160,7 +165,9 @@ def fetch_opportunities(type_name, base_url, verticals):
             if link in seen_links:
                 continue
 
-            detail_res = safe_request(link)
+            detail_url = PROXY_PREFIX + link
+
+            detail_res = safe_request(detail_url)
 
             if not detail_res:
                 continue
@@ -170,9 +177,7 @@ def fetch_opportunities(type_name, base_url, verticals):
             deadline = 'N/A'
 
             for tag in detail_soup.find_all('h2', class_='card-text'):
-
                 strong = tag.find('strong')
-
                 if strong and 'Apply By:' in strong.text:
                     deadline = tag.get_text(strip=True).replace('Apply By:', '').strip()
                     break
@@ -204,7 +209,8 @@ def fetch_opportunities(type_name, base_url, verticals):
             seen_links.add(link)
 
         page += 1
-        time.sleep(3)
+
+        time.sleep(2)
 
     return listings
 
@@ -216,6 +222,7 @@ def scrape_ngobox():
     all_data = []
 
     for name, url in URLS.items():
+
         all_data.extend(fetch_opportunities(name, url, verticals))
 
     if not all_data:
