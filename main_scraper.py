@@ -18,24 +18,26 @@ URLS = {
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Connection": "keep-alive"
+    "Accept-Language": "en-US,en;q=0.9"
 }
 
 session = requests.Session()
 session.headers.update(HEADERS)
 
-# proxy prefix to bypass 403 on GitHub
+# proxy to bypass GitHub runner block
 PROXY_PREFIX = "https://r.jina.ai/"
+
 
 def safe_request(url):
     for attempt in range(3):
         try:
             res = session.get(url, timeout=20, verify=False)
+
             if res.status_code == 200:
                 return res
-            else:
-                print(f"⚠️ Weak response ({res.status_code}) attempt {attempt+1}")
+
+            print(f"⚠️ Weak response ({res.status_code}) attempt {attempt+1}")
+
         except Exception as e:
             print(f"⚠️ Request error attempt {attempt+1}: {e}")
 
@@ -45,24 +47,42 @@ def safe_request(url):
 
 
 def extract_description_after_apply_by(soup):
+
     h2_tags = soup.find_all('h2', class_='card-text')
+
     for h2 in h2_tags:
+
         strong = h2.find('strong')
+
         if strong and 'Apply By:' in strong.text:
+
             desc_parts = []
             seen_lines = set()
+
             for sibling in h2.find_all_next():
+
                 if sibling.name == "div" and "row_section" in sibling.get("class", []):
+
                     b_tag = sibling.find("b")
+
                     if b_tag and b_tag.get_text(strip=True).lower() == "tags":
                         break
+
                 text_content = sibling.get_text(separator='\n', strip=True)
+
                 lines = text_content.split('\n')
-                unique_lines = [line.strip() for line in lines if line.strip() and line.strip() not in seen_lines]
+
+                unique_lines = [
+                    line.strip() for line in lines
+                    if line.strip() and line.strip() not in seen_lines
+                ]
+
                 if unique_lines:
                     seen_lines.update(unique_lines)
                     desc_parts.append('\n'.join(unique_lines))
+
             return "\n".join(desc_parts)
+
     return ''
 
 
@@ -72,20 +92,20 @@ def extract_how_to_apply_from_html(description):
         return "N/A"
 
     custom_keywords = [
-        "Selection Criteria", "Evaluation & Follow-Up", "Application Guidelines",
-        "Eligible Applicants:", "Scope of Work:", "Proposal Requirements",
-        "Evaluation Criteria", "Submission Details", "Eligible Entities",
-        "How to apply", "Purpose of RFP", "Proposal Guidelines",
-        "Eligibility Criteria", "Submission of Tender:", "Technical Bid",
-        "Documents Required", "Vendor Qualifications", "To apply"
+        "Selection Criteria","Evaluation & Follow-Up","Application Guidelines",
+        "Eligible Applicants","Scope of Work","Proposal Requirements",
+        "Evaluation Criteria","Submission Details","Eligible Entities",
+        "How to apply","Purpose of RFP","Proposal Guidelines",
+        "Eligibility Criteria","Documents Required","Vendor Qualifications",
+        "Submission of Tender","Proposal Submission Guidelines"
     ]
 
-    norm_keywords = [kw.lower().rstrip(":") for kw in custom_keywords]
+    norm_keywords = [kw.lower() for kw in custom_keywords]
 
     matched_sections = []
 
     segments = re.split(r'(\.\s+|\n+)', description)
-    segments = [s.strip() for s in segments if s.strip() and not s.strip().startswith('.')]
+    segments = [s.strip() for s in segments if s.strip()]
 
     i = 0
 
@@ -102,9 +122,9 @@ def extract_how_to_apply_from_html(description):
             while i < len(segments):
 
                 next_segment = segments[i]
-                next_segment_lower = next_segment.lower()
+                next_lower = next_segment.lower()
 
-                if any(kw in next_segment_lower for kw in norm_keywords):
+                if any(kw in next_lower for kw in norm_keywords):
                     break
 
                 section.append(next_segment)
@@ -129,8 +149,6 @@ def fetch_opportunities(type_name, base_url, verticals):
     while page <= MAX_PAGES:
 
         raw_url = f"{base_url}?page={page}"
-
-        # proxy url to bypass 403
         url = PROXY_PREFIX + raw_url
 
         print(f"🔍 Scraping {type_name} Page {page} → {raw_url}")
@@ -143,24 +161,34 @@ def fetch_opportunities(type_name, base_url, verticals):
 
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        cards = soup.find_all('div', class_='card-block')
+        # find opportunity links instead of card-block
+        links = soup.find_all("a", href=True)
 
-        if not cards:
-            print(f"⚠️ No more cards found on {type_name} Page {page}. Stopping.")
+        opportunity_links = []
+
+        for a in links:
+
+            href = a["href"]
+
+            if "/grant-details/" in href or "/rfp-details/" in href:
+
+                opportunity_links.append(a)
+
+        if not opportunity_links:
+
+            print(f"⚠️ No opportunities found on {type_name} Page {page}. Stopping.")
             break
 
-        for card in cards:
+        for a in opportunity_links:
 
-            a = card.find('a', href=True)
+            href = a["href"].strip()
 
-            if not a:
-                continue
-
-            href = a['href'].strip()
-
-            link = href if href.startswith('http') else f"https://ngobox.org/{href.lstrip('/')}"
+            link = href if href.startswith("http") else f"https://ngobox.org/{href.lstrip('/')}"
 
             title = a.get_text(strip=True)
+
+            if not title:
+                continue
 
             if link in seen_links:
                 continue
@@ -174,17 +202,19 @@ def fetch_opportunities(type_name, base_url, verticals):
 
             detail_soup = BeautifulSoup(detail_res.text, 'html.parser')
 
-            deadline = 'N/A'
+            deadline = "N/A"
 
-            for tag in detail_soup.find_all('h2', class_='card-text'):
-                strong = tag.find('strong')
-                if strong and 'Apply By:' in strong.text:
-                    deadline = tag.get_text(strip=True).replace('Apply By:', '').strip()
+            for tag in detail_soup.find_all("h2", class_="card-text"):
+
+                strong = tag.find("strong")
+
+                if strong and "Apply By:" in strong.text:
+                    deadline = tag.get_text(strip=True).replace("Apply By:", "").strip()
                     break
 
             description_html = extract_description_after_apply_by(detail_soup)
 
-            description = BeautifulSoup(description_html, 'html.parser').get_text(separator=' ', strip=True)
+            description = BeautifulSoup(description_html, "html.parser").get_text(separator=" ", strip=True)
 
             how_to_apply = extract_how_to_apply_from_html(description)
 
@@ -209,7 +239,6 @@ def fetch_opportunities(type_name, base_url, verticals):
             seen_links.add(link)
 
         page += 1
-
         time.sleep(2)
 
     return listings
@@ -222,7 +251,6 @@ def scrape_ngobox():
     all_data = []
 
     for name, url in URLS.items():
-
         all_data.extend(fetch_opportunities(name, url, verticals))
 
     if not all_data:
@@ -230,7 +258,7 @@ def scrape_ngobox():
 
     df = pd.DataFrame(all_data)
 
-    df = df[df['Clickable_Link'].notna() & (df['Clickable_Link'].str.strip() != '')]
+    df = df[df["Clickable_Link"].notna() & (df["Clickable_Link"].str.strip() != "")]
 
     df["Source"] = "NGOBOX"
 
