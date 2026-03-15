@@ -1,17 +1,12 @@
 name: Run Combined Scraper
 
-# 👇 REQUIRED for git push permission (fixes 403 error)
 permissions:
   contents: write
 
 on:
-  # Manual run from Actions tab
   workflow_dispatch:
 
-  # Daily auto run
   schedule:
-    # GitHub uses UTC time
-    # India 2:00 AM = 20:30 UTC
     - cron: "30 20 * * *"
 
 jobs:
@@ -29,13 +24,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pandas openpyxl requests beautifulsoup4
+          pip install -r requirements.txt
 
       - name: Run Combined Scraper
         run: |
           python combined_scraper.py
 
-      # 👇 Commit only if Excel changed (SMART COMMIT)
       - name: Commit updated Excel file
         run: |
           git config --global user.name "github-actions"
