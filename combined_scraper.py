@@ -13,7 +13,7 @@ from metro import fetch_metro_tenders
 from niua_tenders import scrape_niua_tenders
 
 
-def run_combined_scraper(return_df=False):  # ✅ return_df added for API use
+def run_combined_scraper(return_df=False):
     # ---------------- SCRAPERS ----------------
     print("🔍 Running NGOBOX scraper...")
     ngobox_df = scrape_ngobox()
@@ -118,28 +118,26 @@ def run_combined_scraper(return_df=False):  # ✅ return_df added for API use
 
     combined_df["Clickable_Link"] = combined_df["Clickable_Link"].apply(clean_clickable_link)
 
-    # ---------------- 🔥 KEY FIX ----------------
-    # ✅ Keep FULL description
+    # ---------------- 🔥 KEEP FULL DESCRIPTION ----------------
     combined_df["Full_Description"] = combined_df["Description"]
-
-    # ✅ Excel-only truncate
-    def truncate_description(desc):
-        if pd.isna(desc):
-            return ""
-        desc = str(desc)
-        return desc[:300].rstrip() + " ... Read More" if len(desc) > 300 else desc
-
-    combined_df["Description"] = combined_df["Description"].apply(truncate_description)
 
     # ---------------- FILTER ----------------
     combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
     combined_df = combined_df[combined_df["Days_Left"].fillna(999) >= 0]
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
 
-    # ---------------- SAVE EXCEL ----------------
-    excel_df = combined_df.drop(columns=["Full_Description"], errors="ignore")
+    # ---------------- SAVE EXCEL (TRUNCATED ONLY FOR FILE) ----------------
+    def truncate_description(desc):
+        if pd.isna(desc):
+            return ""
+        desc = str(desc)
+        return desc[:300].rstrip() + " ... Read More" if len(desc) > 300 else desc
+
+    excel_df = combined_df.copy()
+    excel_df["Description"] = excel_df["Description"].apply(truncate_description)
 
     excel_path = "all_grants.xlsx"
+    excel_df = excel_df.drop(columns=["Full_Description"], errors="ignore")
     excel_df.to_excel(excel_path, index=False)
 
     wb = load_workbook(excel_path)
@@ -159,8 +157,11 @@ def run_combined_scraper(return_df=False):  # ✅ return_df added for API use
     # ---------------- RETURN FOR API ----------------
     if return_df:
         api_df = combined_df.copy()
+
+        # ✅ RETURN FULL DESCRIPTION
         api_df["Description"] = api_df["Full_Description"]
         api_df = api_df.drop(columns=["Full_Description"], errors="ignore")
+
         return api_df
 
     return None
