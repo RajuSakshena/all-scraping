@@ -38,8 +38,9 @@ keywords = {
 priority = ["Governance", "Learning", "Safety", "Climate"]
 
 BASE_URL = "https://www.metrorailnagpur.com"
-URL = f"{BASE_URL}/tenders"
+URL = f"{BASE_URL}/nagpur-metro-tenders"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
 
 def fetch_metro_tenders():
     print(f"🔍 Fetching tenders from: {URL}")
@@ -47,49 +48,42 @@ def fetch_metro_tenders():
     seen_links = set()
 
     try:
-        res = requests.get(URL, headers=HEADERS, timeout=10)
+        res = requests.get(URL, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(res.text, "html.parser")
 
-        blocks = soup.find_all("td", class_="numeric")
-        if not blocks:
-            print("⚠️ No tender blocks found.")
+        # Updated selector (page uses tables heavily)
+        rows = soup.find_all("tr")
+
+        if not rows:
+            print("⚠️ No tender rows found.")
             return pd.DataFrame()
 
-        for block in blocks:
-            header_span = block.find("span", style=lambda s: s and "display:table-cell" in s)
-            tender_title = header_span.get_text(strip=True) if header_span else "N/A"
-
-            desc_parts = []
-            for element in block.contents:
-                if element.name == "table":
-                    break
-                text = element.get_text(strip=True, separator=" ") if hasattr(element, "get_text") else element.strip()
-                if text:
-                    desc_parts.append(text)
-            full_description = " ".join(desc_parts).strip()
-            tender_full_title = f"{tender_title} — {full_description}"
-
-            inner_table = block.find("table")
-            if not inner_table:
+        for row in rows:
+            cols = row.find_all("td")
+            if len(cols) < 2:
                 continue
 
-            # --- Find all links ---
-            all_links = inner_table.find_all("a", href=True)
-            if not all_links:
+            # Title
+            title = cols[1].get_text(strip=True)
+
+            # Find all links
+            links = row.find_all("a", href=True)
+            if not links:
                 continue
 
-            # --- Prioritize Notice Inviting link ---
             notice_link_tag = None
-            for a_tag in all_links:
-                if "notice inviting" in a_tag.get_text(strip=True).lower():
+            for a_tag in links:
+                if "notice" in a_tag.get_text(strip=True).lower():
                     notice_link_tag = a_tag
                     break
+
             if not notice_link_tag:
-                notice_link_tag = all_links[0]  # fallback to first link
+                notice_link_tag = links[0]
 
             doc_name = notice_link_tag.get_text(strip=True)
             link = notice_link_tag["href"].strip()
-            if link and not link.startswith("http"):
+
+            if not link.startswith("http"):
                 link = f"{BASE_URL}/{link.lstrip('/')}"
 
             if link in seen_links:
@@ -97,10 +91,10 @@ def fetch_metro_tenders():
             seen_links.add(link)
 
             # Keyword matching
-            text_blob = full_description.lower()
+            text_blob = title.lower()
             text_blob_clean = text_blob.translate(str.maketrans('', '', string.punctuation))
-            matched_verticals = []
 
+            matched_verticals = []
             for vertical in priority:
                 for word in keywords.get(vertical, []):
                     if re.search(r'\b{}\b'.format(re.escape(word.lower())), text_blob_clean):
@@ -109,7 +103,7 @@ def fetch_metro_tenders():
 
             if matched_verticals:
                 tenders.append({
-                    "Title": tender_full_title,
+                    "Title": title,
                     "Description": doc_name,
                     "Matched_Vertical": ", ".join(matched_verticals),
                     "Clickable_Link": '=HYPERLINK("{}","{}")'.format(link, doc_name.replace('"', '""')),
@@ -120,11 +114,11 @@ def fetch_metro_tenders():
                     "Days_Left": pd.NA
                 })
 
-        print(f"✅ Found {len(tenders)} tenders with valid Notice Inviting links.")
+        print(f"✅ Found {len(tenders)} tenders.")
         return pd.DataFrame(tenders)
 
     except requests.exceptions.RequestException as e:
-        print(f"❌ Network or request error: {e}")
+        print(f"❌ Network error: {e}")
         return pd.DataFrame()
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
