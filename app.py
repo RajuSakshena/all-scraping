@@ -6,19 +6,31 @@ import io
 import time
 
 app = Flask(__name__)
-
-# ✅ Enable CORS (fix browser blocking)
 CORS(app)
 
-# GitHub RAW Excel URL
 EXCEL_URL = "https://raw.githubusercontent.com/RajuSakshena/all-scraping/main/all_grants.xlsx"
 
-# Cache variables
+# Cache
 cached_df = None
 last_fetch_time = 0
+CACHE_DURATION = 600  # 10 min
 
-# Auto refresh time
-CACHE_DURATION = 600
+
+# ======================================================
+# 🔥 FAST FETCH WITH TIMEOUT + RETRY
+# ======================================================
+def fetch_excel():
+    for i in range(3):  # retry 3 times
+        try:
+            response = requests.get(EXCEL_URL, timeout=10)
+
+            if response.status_code == 200:
+                return response.content
+
+        except Exception:
+            time.sleep(2)
+
+    raise Exception("❌ Failed to fetch Excel after retries")
 
 
 def get_excel_data():
@@ -26,33 +38,38 @@ def get_excel_data():
 
     current_time = time.time()
 
-    if cached_df is None or (current_time - last_fetch_time) > CACHE_DURATION:
+    # ✅ Use cache if valid
+    if cached_df is not None and (current_time - last_fetch_time) < CACHE_DURATION:
+        return cached_df
 
-        response = requests.get(EXCEL_URL)
+    print("🔄 Fetching fresh data...")
 
-        if response.status_code != 200:
-            raise Exception("Could not fetch file from GitHub")
+    content = fetch_excel()
 
-        cached_df = pd.read_excel(io.BytesIO(response.content))
-        cached_df = cached_df.fillna("")
+    df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
+    df = df.fillna("")
 
-        last_fetch_time = current_time
+    # ✅ LIMIT rows for faster UI
+    cached_df = df.head(300)
+
+    last_fetch_time = current_time
 
     return cached_df
 
 
+# ======================================================
+# ROUTES
+# ======================================================
 @app.route("/")
 def home():
-    return "Flask App Running"
+    return "Flask App Running 🚀"
 
 
-# JSON API
 @app.route("/jobs-json")
 def jobs_json():
     try:
         df = get_excel_data()
-        data = df.to_dict(orient="records")
-        return jsonify(data)
+        return jsonify(df.to_dict(orient="records"))
     except Exception as e:
         return {"error": str(e)}, 500
 
@@ -60,13 +77,10 @@ def jobs_json():
 @app.route("/download")
 def download_excel():
     try:
-        response = requests.get(EXCEL_URL)
-
-        if response.status_code != 200:
-            return "Could not fetch file from GitHub", 404
+        content = fetch_excel()
 
         return send_file(
-            io.BytesIO(response.content),
+            io.BytesIO(content),
             download_name="all_grants.xlsx",
             as_attachment=True,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -80,7 +94,20 @@ def download_excel():
 def jobs_dashboard():
     try:
         df = get_excel_data()
-        table_html = df.to_html(index=False)
+
+        # ✅ fast render (no heavy HTML)
+        rows = df.to_dict(orient="records")
+
+        html_rows = ""
+        for r in rows:
+            html_rows += f"""
+            <tr>
+                <td>{r.get('Title','')}</td>
+                <td>{r.get('Deadline','')}</td>
+                <td>{r.get('Matched_Vertical','')}</td>
+                <td><a href="{r.get('Apply_Link','')}" target="_blank">Apply</a></td>
+            </tr>
+            """
 
         html = f"""
         <html>
@@ -93,13 +120,13 @@ def jobs_dashboard():
                     background-color: #f4f6f9;
                 }}
 
-                .download-btn {{
+                .btn {{
                     background: #58a648;
                     color: white;
-                    padding: 10px 18px;
+                    padding: 8px 14px;
                     border-radius: 6px;
                     text-decoration: none;
-                    font-weight: bold;
+                    margin-right: 10px;
                 }}
 
                 table {{
@@ -113,7 +140,6 @@ def jobs_dashboard():
                     background: #0b3c5d;
                     color: white;
                     padding: 8px;
-                    text-align: left;
                 }}
 
                 td {{
@@ -125,17 +151,20 @@ def jobs_dashboard():
 
         <body>
 
-            <h2>Latest Job Listings</h2>
+            <h2>🚀 Latest Job Listings</h2>
 
-            <a class="download-btn" href="/download">
-                Download Excel
-            </a>
+            <a class="btn" href="/download">Download Excel</a>
+            <a class="btn" href="/jobs-json" target="_blank">View JSON</a>
 
-            <a class="download-btn" href="/jobs-json" target="_blank">
-                View JSON
-            </a>
-
-            {table_html}
+            <table>
+                <tr>
+                    <th>Title</th>
+                    <th>Deadline</th>
+                    <th>Vertical</th>
+                    <th>Apply</th>
+                </tr>
+                {html_rows}
+            </table>
 
         </body>
         </html>
@@ -147,5 +176,8 @@ def jobs_dashboard():
         return f"Dashboard Error: {str(e)}", 500
 
 
+# ======================================================
+# RUN
+# ======================================================
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
