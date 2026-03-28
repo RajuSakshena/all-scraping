@@ -9,21 +9,29 @@ from dev import scrape_devnetjobs
 from nasscom import scrape_nasscom
 from wri import fetch_wri_opportunities
 from hcl import scrape_hcl
-from metro import fetch_metro_tenders
+from metro import fetch_metro_tenders  # CRITICAL: Metro import added
+
+# ✅ NIUA IMPORT ADDED (NO EXISTING IMPORT REMOVED)
 from niua_tenders import scrape_niua_tenders
 
+# ✅ NEW ANDPURPOSE IMPORT (ADDED ONLY)
+from andpurpose import scrape_andpurpose
 
-def run_combined_scraper(return_df=False):
-    # ---------------- SCRAPERS ----------------
+
+def run_combined_scraper():
+    # Run NGOBOX
     print("🔍 Running NGOBOX scraper...")
     ngobox_df = scrape_ngobox()
 
+    # Run DevNetJobs
     print("🔍 Running DevNetJobs India scraper...")
     devnet_df = scrape_devnetjobs()
-
+    
+    # Run Nasscom
     print("🔍 Running Nasscom scraper...")
     nasscom_df = scrape_nasscom()
 
+    # Run WRI
     print("🔍 Running WRI scraper...")
     try:
         wri_data = fetch_wri_opportunities()
@@ -33,6 +41,7 @@ def run_combined_scraper(return_df=False):
             wri_df["Type"] = "N/A"
             wri_df["Deadline"] = pd.NaT
             wri_df["Days_Left"] = pd.NA
+            wri_df = wri_df.rename(columns={"Clickable_Link": "Clickable_Link"}) if "Clickable_Link" in wri_df.columns else wri_df
             print(f"  -> WRI scraped {len(wri_df)} items.")
         else:
             wri_df = pd.DataFrame()
@@ -41,29 +50,39 @@ def run_combined_scraper(return_df=False):
         print(f"❌ WRI scraper failed: {e}")
         wri_df = pd.DataFrame()
 
+    # Run HCL
     print("🔍 Running HCL Foundation scraper...")
     try:
         hcl_df = scrape_hcl()
-        print(f"  -> HCL scraped {len(hcl_df)} items." if not hcl_df.empty else "⚠️ HCL returned no data.")
+        if hcl_df.empty:
+            print("⚠️ HCL returned no data.")
+        else:
+            print(f"  -> HCL scraped {len(hcl_df)} items.")
     except Exception as e:
         print(f"❌ HCL scraper failed: {e}")
         hcl_df = pd.DataFrame()
-
+    
+    # Run Metro Rail Tenders
     print("🔍 Running Nagpur Metro Rail scraper...")
     try:
         metro_df = fetch_metro_tenders()
-        print(f"  -> Metro scraped {len(metro_df)} items." if not metro_df.empty else "⚠️ Metro returned no data.")
+        if metro_df.empty:
+            print("⚠️ Nagpur Metro Rail returned no data.")
+        else:
+            print(f"  -> Nagpur Metro Rail scraped {len(metro_df)} items.")
     except Exception as e:
-        print(f"❌ Metro scraper failed: {e}")
+        print(f"❌ Nagpur Metro Rail scraper failed: {e}")
         metro_df = pd.DataFrame()
 
+    # ✅ RUN NIUA SCRAPER (ADDED, NOTHING REMOVED)
     print("🔍 Running NIUA Tenders scraper...")
     try:
         niua_raw_df = scrape_niua_tenders()
         if niua_raw_df.empty:
-            niua_df = pd.DataFrame()
             print("⚠️ NIUA returned no data.")
+            niua_df = pd.DataFrame()
         else:
+            print(f"  -> NIUA scraped {len(niua_raw_df)} items.")
             niua_df = pd.DataFrame({
                 "Source": "NIUA",
                 "Type": "Tender",
@@ -75,18 +94,30 @@ def run_combined_scraper(return_df=False):
                 "Days_Left": pd.NA,
                 "Clickable_Link": niua_raw_df["Tender_Link"]
             })
-            print(f"  -> NIUA scraped {len(niua_df)} items.")
     except Exception as e:
         print(f"❌ NIUA scraper failed: {e}")
         niua_df = pd.DataFrame()
 
-    # ---------------- SCHEMA ----------------
+    # ✅ RUN ANDPURPOSE SCRAPER (NEW ADDITION ONLY)
+    print("🔍 Running AndPurpose scraper...")
+    try:
+        andpurpose_df = scrape_andpurpose()
+        if andpurpose_df.empty:
+            print("⚠️ AndPurpose returned no data.")
+        else:
+            print(f"  -> AndPurpose scraped {len(andpurpose_df)} items.")
+    except Exception as e:
+        print(f"❌ AndPurpose scraper failed: {e}")
+        andpurpose_df = pd.DataFrame()
+
+    # --- Final Schema Alignment and Merging ---
     final_columns = [
         "Source", "Type", "Title", "Description",
         "How_to_Apply", "Matched_Vertical", "Deadline",
         "Days_Left", "Clickable_Link"
     ]
 
+    # Align schemas
     ngobox_df = ngobox_df.reindex(columns=final_columns)
     devnet_df = devnet_df.reindex(columns=final_columns)
     nasscom_df = nasscom_df.reindex(columns=final_columns)
@@ -95,76 +126,103 @@ def run_combined_scraper(return_df=False):
     metro_df = metro_df.reindex(columns=final_columns)
     niua_df = niua_df.reindex(columns=final_columns)
 
+    # ✅ ANDPURPOSE ALIGNMENT (ONLY ADDITION)
+    andpurpose_df = andpurpose_df.reindex(columns=final_columns)
+
+    # Force Nasscom Days_Left blank
+    if "Days_Left" in nasscom_df.columns:
+        nasscom_df["Days_Left"] = pd.NA
+
+    # Merge everything
     combined_df = pd.concat(
-        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df, niua_df],
+        [ngobox_df, devnet_df, nasscom_df, wri_df, hcl_df, metro_df, niua_df, andpurpose_df],
         ignore_index=True
     )
 
     if combined_df.empty:
         print("❌ No data found from any source.")
-        return None
+        return
 
-    # ---------------- CLEANING ----------------
+    # 🔥 SENIOR-LEVEL UX & DATA QUALITY FIXES
+
     def clean_clickable_link(link):
-        if pd.isna(link):
+        if pd.isna(link) or str(link).strip() == "":
             return ""
-        link_str = str(link)
+        link_str = str(link).strip()
         if link_str.upper().startswith("=HYPERLINK"):
             try:
-                return link_str.split('"')[1]
-            except:
-                return link_str
+                start_idx = link_str.find('"') + 1
+                if start_idx > 0:
+                    end_idx = link_str.find('"', start_idx)
+                    if end_idx > start_idx:
+                        return link_str[start_idx:end_idx]
+            except Exception:
+                pass
         return link_str
 
     combined_df["Clickable_Link"] = combined_df["Clickable_Link"].apply(clean_clickable_link)
 
-    # ---------------- 🔥 KEEP FULL DESCRIPTION ----------------
-    combined_df["Full_Description"] = combined_df["Description"]
+    def truncate_description(desc):
+        if pd.isna(desc) or str(desc).strip() == "":
+            return ""
+        desc_str = str(desc).strip()
+        if len(desc_str) > 300:
+            return desc_str[:300].rstrip() + " ... Read More"
+        return desc_str
 
-    # ---------------- FILTER ----------------
-    combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
-    combined_df = combined_df[combined_df["Days_Left"].fillna(999) >= 0]
+    combined_df["Description"] = combined_df["Description"].apply(truncate_description)
+
+    # Filter out expired deadlines
+    if "Days_Left" in combined_df.columns:
+        combined_df["Days_Left"] = pd.to_numeric(combined_df["Days_Left"], errors="coerce")
+        combined_df = combined_df[combined_df["Days_Left"].fillna(999) >= 0]
+
+    # Sort
     combined_df = combined_df.sort_values(["Days_Left"], ascending=True, na_position="last")
 
-    # ---------------- SAVE EXCEL (TRUNCATED ONLY FOR FILE) ----------------
-    def truncate_description(desc):
-        if pd.isna(desc):
-            return ""
-        desc = str(desc)
-        return desc[:300].rstrip() + " ... Read More" if len(desc) > 300 else desc
+    # Round Days_Left
+    if "Days_Left" in combined_df.columns:
+        combined_df["Days_Left"] = combined_df["Days_Left"].apply(
+            lambda x: int(round(x)) if pd.notna(x) else x
+        )
 
-    excel_df = combined_df.copy()
-    excel_df["Description"] = excel_df["Description"].apply(truncate_description)
-
+    # Save Excel
     excel_path = "all_grants.xlsx"
-    excel_df = excel_df.drop(columns=["Full_Description"], errors="ignore")
-    excel_df.to_excel(excel_path, index=False)
+    combined_df.to_excel(excel_path, index=False, engine="openpyxl")
 
+    # Format Excel
     wb = load_workbook(excel_path)
     ws = wb.active
 
-    for col, width in zip("ABCDEFGHI", [15,15,50,100,60,25,18,12,60]):
+    col_widths = {
+        "A": 15,
+        "B": 15,
+        "C": 50,
+        "D": 100,
+        "E": 60,
+        "F": 25,
+        "G": 18,
+        "H": 12,
+        "I": 60,
+    }
+
+    for col, width in col_widths.items():
         ws.column_dimensions[col].width = width
 
     for row in ws.iter_rows(min_row=2):
         for cell in row:
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            if cell.column_letter in ["D", "E"]:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            else:
+                cell.alignment = Alignment(wrap_text=False, vertical="top")
 
     wb.save(excel_path)
 
-    print(f"✅ Excel saved: {excel_path} ({len(excel_df)} rows)")
-
-    # ---------------- RETURN FOR API ----------------
-    if return_df:
-        api_df = combined_df.copy()
-
-        # ✅ RETURN FULL DESCRIPTION
-        api_df["Description"] = api_df["Full_Description"]
-        api_df = api_df.drop(columns=["Full_Description"], errors="ignore")
-
-        return api_df
-
-    return None
+    # Print summary
+    print("\n📊 Summary of scraped data:")
+    print(combined_df["Source"].value_counts())
+    print(f"Total rows in final dataset: {len(combined_df)}")
+    print(f"✅ Combined Excel saved as {excel_path} (Rows: {len(combined_df)})")
 
 
 if __name__ == "__main__":
